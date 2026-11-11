@@ -356,6 +356,26 @@ npm run build
 npm run preview
 ```
 
+**Build the Android app (APK)**
+
+The Android app runs the same web app in a WebView and opens folders through the Android Storage Access Framework, so every feature, including write features such as deletion, bookmarks and message edits, works on Android. The APK has no internet permission.
+
+Requirements: JDK 17 or later and the Android SDK with platform 37. Create `android/local.properties` with `sdk.dir=…`. Optionally add `fbmae.outputRoot=<folder>` to put build output outside the source tree.
+
+```bash
+npm run build:android
+```
+
+```bash
+npm run build:android:release
+```
+
+Without `android/keystore.properties`, the release APK is signed with the debug key; it can be sideloaded but not published.
+
+On Android 11 and later, the folder picker cannot select the root of internal storage or the root of `Download`. Extract the export into its own folder, for example `Download/facebook-export`, and select that folder.
+
+Measured on a Galaxy S23: release APK size …, cold start …, memory while playing a 300 MB video ….
+
 <a name="64-other-developer-commands"></a>
 
 ### 6.4. Other Developer Commands

@@ -43,7 +43,7 @@ The React app talks only to the handle interfaces in `src/types/fileSystem.ts`. 
 
 ### 3.1 Repository layout
 
-- `android/`: a Gradle project with one `app` module written in Kotlin, with no Compose and no AppCompat. The only library dependency is `androidx.webkit`. `minSdk 29`, `compileSdk 37`, `targetSdk 37`.
+- `android/`: a Gradle project with one `app` module written in Kotlin, with no Compose and no AppCompat. The only library dependency is `androidx.webkit`. `minSdk 30`, `compileSdk 37`, `targetSdk 37`.
 - `src/platform/android/`:
   - `nativeBridge.ts`: request and response transport over the `fbmae` channel.
   - `safHandles.ts`: `SafDirectoryHandle`, `SafFileHandle` and `SafWritable`, which implement `WritableDirectoryHandle`, `WritableFileHandle` and the writable stream subset the app uses.
@@ -59,7 +59,7 @@ The React app talks only to the handle interfaces in `src/types/fileSystem.ts`. 
   - output to `F:\Project\FB-Messages-Archive-Explorer\android-web\`.
 - Gradle reads its assets from that folder and writes `layout.buildDirectory` to `F:\Project\FB-Messages-Archive-Explorer\android-build\`.
 - Builds use the project lock `F:\Project\FB-Messages-Archive-Explorer\gradle.lock`. `GRADLE_USER_HOME` stays `F:\Project\.gradle`. Never run `gradlew --stop`.
-- Release signing reads `android/keystore.properties` (gitignored). The keystore file lives outside the repository.
+- Release signing reads `android/keystore.properties` (gitignored); without it, release builds are signed with the debug key for sideloading.
 - Release builds enable R8 and `shrinkResources`.
 
 ## 4. SAF bridge
@@ -79,7 +79,7 @@ The React app talks only to the handle interfaces in `src/types/fileSystem.ts`. 
 | `entries()` | One `DocumentsContract` children query projecting id, display name, MIME type, size and last modified time. Results are cached per handle. |
 | `getDirectoryHandle` / `getFileHandle` | Look up the cached children; with `{create: true}`, call `DocumentsContract.createDocument` (`application/octet-stream` for files so providers keep the exact name) |
 | `getFile()` | `fetch('/saf/…')` → `new File([blob], name, { type, lastModified })` |
-| `createWritable()` | Native opens an output stream in mode `"wt"` on the first write. `write(string | Blob | BufferSource)`, `close()`, `abort()`. |
+| `createWritable()` | Native opens an output stream in mode `"wt"` when `createWritable()` is called. `write(string | Blob | BufferSource)`, `close()`, `abort()`. |
 | `removeEntry(name, {recursive})` | `DocumentsContract.deleteDocument`, then invalidate the parent cache |
 | `queryPermission` / `requestPermission` | `granted` when a persisted permission includes write |
 
