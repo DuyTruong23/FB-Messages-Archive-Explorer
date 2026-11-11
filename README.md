@@ -398,6 +398,7 @@ The production browser command builds before starting preview. To run selected c
 - File access uses the browser's [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API). The browser asks you to select a folder; access is limited to that folder only. On browsers without this API, a folder-upload input is used instead.
 - You can revoke access at any time by closing the tab or refreshing the page.
 - Settings (dark mode, panel widths, etc.) are saved in `localStorage` on your computer, with a cookie fallback if `localStorage` is unavailable. No settings data is sent anywhere.
+- Searching **All** chats builds a search index of message text and saves it in the browser's IndexedDB (`fb-mae-search-index`), so the next search after a reload skips re-reading every chat. An index is rebuilt when a chat's files change, and at most 500 chats are kept. The index never leaves your computer. To remove it, clear this site's data in your browser settings.
 - There are no analytics, telemetry, or third-party scripts.
 - Write access to your archive is only requested if you enable chat deletion or bookmarking in Settings, or press **Cho phép ghi file** to save message edits.
 - The source code is fully open and can be audited.

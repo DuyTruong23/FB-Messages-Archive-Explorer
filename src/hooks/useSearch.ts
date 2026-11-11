@@ -5,40 +5,18 @@ import { buildSearchIndex, performSearch, type SearchOptions } from '../services
 import type { SearchFilter } from '../types/overlay';
 import { DEFAULT_SEARCH_FILTER, isSearchFilterActive } from '../services/searchFilters';
 import { isReactionNoticeMessage } from '../services/reactions';
-import { loadChatMessages } from '../services/fileSystem';
-import { loadMessengerExportChat } from '../services/messengerExport';
+import { mapWithConcurrency } from '../services/concurrency';
+import { getWideSearchClient } from '../services/wideSearch/wideSearchClient';
+import {
+  collectChatSearchFiles,
+  getWideSearchChatKey,
+  getWideSearchChatKind,
+} from '../services/wideSearch/chatSearchFiles';
 
-const WIDE_INDEX_CACHE_LIMIT = 50;
-const globalWideIndexCache = new Map<string, { dirHandle: ReadableDirectoryHandle; index: SearchIndexEntry[] }>();
-
-function getWideIndexCacheKey(entry: ChatListEntry, hide = true): string {
-  return `${entry.source}:${entry.folderName}:${entry._jsonFileName || ''}:${hide && !entry._messengerExport}`;
-}
-
-function getCachedWideIndex(entry: ChatListEntry, hide: boolean): SearchIndexEntry[] | null {
-  const key = getWideIndexCacheKey(entry, hide);
-  const cached = globalWideIndexCache.get(key);
-  if (!cached || cached.dirHandle !== entry.dirHandle) {
-    if (cached) globalWideIndexCache.delete(key);
-    return null;
-  }
-
-  globalWideIndexCache.delete(key);
-  globalWideIndexCache.set(key, cached);
-  return cached.index;
-}
-
-function setCachedWideIndex(entry: ChatListEntry, index: SearchIndexEntry[], hide: boolean) {
-  const key = getWideIndexCacheKey(entry, hide);
-  globalWideIndexCache.delete(key);
-  globalWideIndexCache.set(key, { dirHandle: entry.dirHandle, index });
-
-  while (globalWideIndexCache.size > WIDE_INDEX_CACHE_LIMIT) {
-    const oldestKey = globalWideIndexCache.keys().next().value;
-    if (!oldestKey) break;
-    globalWideIndexCache.delete(oldestKey);
-  }
-}
+/** Chats read and indexed at once; parsing itself is serialized in the search worker. */
+const WIDE_SEARCH_CONCURRENCY = 3;
+/** Minimum gap between partial "All" result updates. */
+const WIDE_RESULTS_PUBLISH_MS = 150;
 
 export interface SearchOverlayState {
   deletedMask: Uint8Array;
@@ -156,46 +134,44 @@ export function useSearch(
         if (signal.aborted) return;
         setResults(found);
       } else {
-        const allResults: SearchResult[] = [];
+        const client = getWideSearchClient();
         const total = archiveList.length;
+        const byChat: SearchResult[][] = new Array(total);
+        let done = 0;
+        let lastPublish = 0;
+        const publish = () => {
+          lastPublish = performance.now();
+          setResults(byChat.flat());
+        };
 
-        for (let i = 0; i < archiveList.length; i++) {
-          if (signal.aborted) return;
-          const entry = archiveList[i];
+        await mapWithConcurrency(archiveList, WIDE_SEARCH_CONCURRENCY, async (entry, i) => {
           try {
-            let index = getCachedWideIndex(entry, hideNotices);
-            if (!index) {
-              const data = entry._messengerExport
-                ? await loadMessengerExportChat(entry.dirHandle, entry._jsonFileName!, undefined, signal)
-                : await loadChatMessages(entry.dirHandle, undefined, signal);
-              if (signal.aborted) return;
-              index = buildSearchIndex(data.messages, hideNotices && !entry._messengerExport ? isReactionNoticeMessage : () => false);
-              setCachedWideIndex(entry, index, hideNotices);
-            }
+            const files = await collectChatSearchFiles(entry, signal);
             const isOpenChat = !!currentOverlay?.sourceFile && entry._messengerExport
               && entry._jsonFileName === currentOverlay.sourceFile && entry.dirHandle === currentOverlay.directory;
-            const found = await performSearch(searchQuery, index, undefined, signal, {
-              filter: { ...DEFAULT_SEARCH_FILTER, normalize: filter.normalize },
+            const items = await client.searchChat({
+              key: getWideSearchChatKey(entry, hideNotices),
+              kind: getWideSearchChatKind(entry),
+              files,
+              hideNotices,
+              query: searchQuery,
+              normalize: filter.normalize !== false,
               deletedMask: isOpenChat ? currentOverlay.deletedMask : undefined,
-            });
+            }, signal);
             if (signal.aborted) return;
-            
-            found.forEach(r => {
-              allResults.push({
-                item: {
-                  ...r.item,
-                  chatTitle: entry.title,
-                  chatFolderName: entry.folderName,
-                },
-              });
-            });
+            byChat[i] = items.map(item => ({
+              item: { ...item, chatTitle: entry.title, chatFolderName: entry.folderName },
+            }));
           } catch (e: any) {
-            if (e.name === 'AbortError') throw e;
+            if (e?.name === 'AbortError' || signal.aborted) throw e;
           }
           if (signal.aborted) return;
-          setProgress(Math.round(((i + 1) / total) * 100));
-        }
-        setResults(allResults);
+          done++;
+          setProgress(Math.round((done / total) * 100));
+          if (byChat[i]?.length && performance.now() - lastPublish >= WIDE_RESULTS_PUBLISH_MS) publish();
+        }, signal);
+        if (signal.aborted) return;
+        publish();
       }
     } catch (e: any) {
       if (e.name === 'AbortError') {
@@ -249,7 +225,7 @@ export function useSearch(
   }, []);
 
   const clearWideSearchCache = useCallback(() => {
-    globalWideIndexCache.clear();
+    getWideSearchClient().clearMemory();
   }, []);
 
   return { filter, setFilter, filterActive, hasSearched, noticesFiltered: hideNotices && !standalone, activeQuery, results, isSearching, progress, isWideSearch, setIsWideSearch, startSearch, clearSearch, clearWideSearchCache };
