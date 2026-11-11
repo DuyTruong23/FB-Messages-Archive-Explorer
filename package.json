@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:web:android": "tsc -b && vite build --mode android",
     "lint": "oxlint",
     "test": "vitest run test",
     "test:e2e": "npm run build && node scripts/run-e2e.mjs",

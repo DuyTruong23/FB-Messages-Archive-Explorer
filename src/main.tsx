@@ -25,10 +25,18 @@ window.onunhandledrejection = (event: PromiseRejectionEvent) => {
   console.error('[Global] Unhandled promise rejection:', event.reason);
 };
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </StrictMode>,
-);
+const platformReady = import.meta.env.MODE === 'android'
+  ? import('./platform/android/install')
+    .then(module => module.installAndroidPlatform())
+    .catch(error => console.error('[Android] Platform install failed:', error))
+  : Promise.resolve();
+
+void platformReady.then(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </StrictMode>,
+  );
+});
