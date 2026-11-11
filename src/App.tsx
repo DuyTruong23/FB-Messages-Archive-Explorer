@@ -16,6 +16,9 @@ import { useResizable } from './hooks/useResizable';
 import { sortSelectableItemsNewestFirst, useSelection } from './hooks/useSelection';
 import { useAttachments, useSharedLinks } from './hooks/useAttachments';
 import { useBookmarks } from './hooks/useBookmarks';
+import { OverlayContext, useOverlay } from './hooks/useOverlay';
+import { MessageSelectionContext, useMessageSelection } from './hooks/useMessageSelection';
+import { getParticipantNames } from './services/parser';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { ChatView } from './components/Chat/ChatView';
 import { DateNavigator } from './components/Chat/DateNavigator';
@@ -39,6 +42,27 @@ export default function App() {
   const location = navigationState.location;
   const archive = useArchive(settings.deletionEnabled, settings.debuggingEnabled);
   const chat = useChat();
+  const overlay = useOverlay(chat.activeEntry, chat.chatData);
+  const messageSelection = useMessageSelection(chat.chatData);
+  const { setSelectedPerspective: setChatPerspective, selectedPerspective } = chat;
+  const { setMe: setOverlayMe } = overlay;
+  // "Me" is saved in the overlay so it follows the conversation file.
+  const setPerspective = useCallback((name: string) => {
+    setChatPerspective(name);
+    setOverlayMe(name);
+  }, [setChatPerspective, setOverlayMe]);
+  const overlayMe = overlay.loaded ? overlay.overlay?.settings?.me : undefined;
+  useEffect(() => {
+    if (!overlayMe || overlayMe === selectedPerspective) return;
+    if (getParticipantNames(chat.chatData).includes(overlayMe)) setChatPerspective(overlayMe);
+    // User choices go through setPerspective, which also updates overlayMe.
+  }, [overlayMe, selectedPerspective, chat.chatData, setChatPerspective]);
+  const searchOverlay = useMemo(() => overlay.available ? {
+    deletedMask: overlay.deletedMask,
+    favoriteIndices: overlay.favoriteIndices,
+    sourceFile: chat.activeEntry?._jsonFileName,
+    directory: chat.activeEntry?.dirHandle,
+  } : undefined, [overlay.available, overlay.deletedMask, overlay.favoriteIndices, chat.activeEntry]);
   const attachmentReferences = useMemo(() => ({
     index: archive.attachmentReferenceIndex,
     standaloneMessenger: archive.standaloneMessenger,
@@ -57,7 +81,7 @@ export default function App() {
     archiveLoading: archive.loading || archive.reactionMutationPending, chatLoading: chat.loading, chatData: chat.chatData, entry: chat.activeEntry,
     mode: settings.reactionTimestampGuessingMode, hide: settings.hideLikelyReactionNotices, showAll: showAllReactionNotices,
   });
-  const search = useSearch(chat.chatData, archiveList, settings.hideLikelyReactionNotices, archive.standaloneMessenger);
+  const search = useSearch(chat.chatData, archiveList, settings.hideLikelyReactionNotices, archive.standaloneMessenger, searchOverlay);
   const { clearWideSearchCache, clearSearch } = search;
   useEffect(() => {
     clearWideSearchCache();
@@ -183,6 +207,16 @@ export default function App() {
     }
   }, [settings.deletionEnabled, settings.attachmentBookmarkingEnabled, settings.folderAccessMode, archive, chat, search, selection, navigation, abortForPickedFolder, resetAfterHandledOpen, resetSidebar, hideGallery]);
 
+  const requestOverlayWriteAccess = useCallback(async (): Promise<boolean> => {
+    const handle = archive.originalRootHandle || archive.rootHandle;
+    if (!handle || !isFileSystemAccessSupported()) return false;
+    try {
+      return await requestDirectoryWritePermission(handle);
+    } catch {
+      return false;
+    }
+  }, [archive.originalRootHandle, archive.rootHandle]);
+
   const handleAttachmentBookmarkingChange = useCallback(async (enabled: boolean): Promise<boolean> => {
     if (!enabled) {
       setSetting('attachmentBookmarkingEnabled', false);
@@ -226,6 +260,8 @@ export default function App() {
 
   return (
     <ReactionFeatureContext.Provider value={reactionFeature}>
+    <OverlayContext.Provider value={overlay}>
+    <MessageSelectionContext.Provider value={messageSelection}>
     <ThreadDataContext.Provider value={navigatingChat ? null : chat.chatData}>
     <AttachmentReferencesContext.Provider value={attachmentReferences}>
     <div className={`container ${settings.infoPanelOpen ? 'info-open' : ''}`} data-mobile-screen={location.screen} inert={!!preview || undefined}>
@@ -256,7 +292,7 @@ export default function App() {
         search={search}
         mediaState={chat.mediaState}
         selectedPerspective={chat.selectedPerspective}
-        setSelectedPerspective={chat.setSelectedPerspective}
+        setSelectedPerspective={setPerspective}
         onJumpToMessage={handleJumpToMessage}
         onAttachmentBookmarkingChange={handleAttachmentBookmarkingChange}
         bookmarkingEnabled={bookmarkingEnabled}
@@ -300,7 +336,7 @@ export default function App() {
         infoPanelOpen={settings.infoPanelOpen}
         onToggleInfoPanel={handleInfo}
         search={search}
-        onSelectPerspective={chat.setSelectedPerspective}
+        onSelectPerspective={setPerspective}
         galleryOpen={galleryOpen}
         galleryDefaultTab={galleryDefaultTab}
         onGalleryTabChange={handleGalleryTabChange}
@@ -309,6 +345,7 @@ export default function App() {
         selection={selection}
         attachmentBookmarkingEnabled={bookmarkingEnabled}
         bookmarks={bookmarks}
+        onRequestOverlayWriteAccess={requestOverlayWriteAccess}
       />
 
       <div
@@ -346,7 +383,7 @@ export default function App() {
             activeEntry={viewEntry}
             mediaState={chat.mediaState}
             selectedPerspective={chat.selectedPerspective}
-            onSelectPerspective={chat.setSelectedPerspective}
+            onSelectPerspective={setPerspective}
             onOpenGallery={handleOpenGallery}
             header={!isMobile && !galleryOpen && selection.selectedCount > 0 && chat.chatData ? (
               <SelectionHeader
@@ -451,6 +488,18 @@ export default function App() {
         {settings.offlineSupportEnabled && (
           <ReloadPrompt canAutoReload={!archive.rootHandle && !archive.loading} />
         )}
+        {overlay.undo && (
+          <div className="overlay-toast" role="status" aria-live="polite">
+            <span>Đã xóa {overlay.undo.count} tin nhắn (file gốc giữ nguyên).</span>
+            <button type="button" onClick={overlay.undoDelete}>Hoàn tác</button>
+          </div>
+        )}
+        {overlay.error && (
+          <div className="overlay-toast error" role="alert">
+            <span>{overlay.error}</span>
+            <button type="button" onClick={overlay.clearError}>Đóng</button>
+          </div>
+        )}
         {deleteDialog.toast && (
           <div className="delete-toast" role="status" aria-live="polite">
             {deleteDialog.toast}
@@ -475,6 +524,8 @@ export default function App() {
     </div>
     </AttachmentReferencesContext.Provider>
     </ThreadDataContext.Provider>
+    </MessageSelectionContext.Provider>
+    </OverlayContext.Provider>
     </ReactionFeatureContext.Provider>
   );
 }

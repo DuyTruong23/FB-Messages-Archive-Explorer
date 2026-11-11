@@ -105,7 +105,7 @@ test('unavailable media retains slot geometry and shows failed counts in red', a
   await page.getByRole('button', { name: /Select messages folder|Select folder/ }).click();
   await page.locator('.chat-list-item').filter({ hasText: 'Messenger Alice' }).click();
   const chat = page.locator('#chat');
-  const failed = chat.getByRole('img', { name: 'Failed to download media. Attachment type unknown.' });
+  const failed = chat.getByRole('img', { name: '⚠ Media tải lỗi' });
   await expect(failed).toHaveCount(2);
   for (const placeholder of await failed.all()) {
     const bounds = await placeholder.boundingBox();

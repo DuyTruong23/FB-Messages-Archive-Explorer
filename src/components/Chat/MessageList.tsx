@@ -12,7 +12,11 @@ import { chunkArray } from '../../services/storage';
 import { resolveMessageJumpTarget } from '../../services/messageJump';
 import { getVisibleMessageNeighbors } from '../../services/messageVisibility';
 import { MessageBubble } from './MessageBubble';
-import { formatMessageSeparatorDate } from '../../services/dateTime';
+import { formatChatTimestamp } from '../../services/dateTime';
+import { useOverlayContext } from '../../hooks/useOverlay';
+import { useMessageSelectionContext } from '../../hooks/useMessageSelection';
+import type { OverlayFavorite } from '../../types/overlay';
+import { MessageActionsContext, type MessageActions } from './messageActions';
 import type { MessagePosition } from '../../services/mobileNavigation';
 import { ReactionVisibilityAnchor } from './ReactionVisibilityAnchor';
 import {
@@ -30,7 +34,10 @@ const CHUNK_ESTIMATED_MESSAGE_HEIGHT = 58;
 const CHUNK_ESTIMATED_MEDIA_HEIGHT = 150;
 const CHUNK_ESTIMATED_SEPARATOR_HEIGHT = 34;
 const CHUNK_PRELOAD_MARGIN_PX = 2_000;
-const TIME_GAP_MS = 10 * 60 * 1000;
+// Messenger shows a time separator after a 15-minute pause and groups
+// consecutive messages from one sender sent less than a minute apart.
+export const SEPARATOR_GAP_MS = 15 * 60 * 1000;
+export const GROUP_GAP_MS = 60 * 1000;
 const JUMP_HIGHLIGHT_SCROLL_THRESHOLD = 24;
 const JUMP_SETTLING_CHECK_MS = 250;
 const JUMP_SETTLING_QUIET_MS = 350;
@@ -42,6 +49,7 @@ const CHAT_OPENING_MEDIA_MARGIN_PX = 2_000;
 const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 type Messages = MessengerThread['messages'];
+const EMPTY_FAVORITES: ReadonlyMap<number, OverlayFavorite> = new Map();
 
 // Keep thread-sized arrays in one context. Passing them to every chunk also
 // makes React's development performance tracks inspect the whole history for
@@ -103,7 +111,7 @@ function estimateChunkHeight(messages: Messages, chunkIndex: number, allMessages
     const prevMsg = prevIdx >= 0 ? allMessages[prevIdx] : null;
     const prevTime = prevMsg ? (getMessageTimestamp(prevMsg) || 0) : 0;
     const currTime = getMessageTimestamp(msg) || 0;
-    if (!prevMsg || Math.abs(currTime - prevTime) > TIME_GAP_MS) separatorCount++;
+    if (!prevMsg || Math.abs(currTime - prevTime) > SEPARATOR_GAP_MS) separatorCount++;
   });
   if (visibleCount === 0) return 0;
   return Math.max(160,
@@ -145,6 +153,10 @@ interface ChunkViewData {
   getChunkHeight: (chunkIndex: number) => number;
   lastVisibleChunk: number;
   forcedChunkIndex: number | null;
+  overlayAvailable: boolean;
+  favoritesByIndex: ReadonlyMap<number, OverlayFavorite>;
+  selectionActive: boolean;
+  selectedIndices: ReadonlySet<number>;
 }
 
 const ChunkViewContext = React.createContext<ChunkViewData | null>(null);
@@ -172,6 +184,10 @@ const MessageChunk = React.memo(function MessageChunk({
     onLinkClick,
     onRendered,
     onHeightMeasured,
+    overlayAvailable,
+    favoritesByIndex,
+    selectionActive,
+    selectedIndices,
   } = React.useContext(ChunkViewContext)!;
   const { allMessages, chunks, visibility, neighbors } = React.useContext(ChunkMessageContext)!;
   const messages = chunks[chunkIndex];
@@ -305,14 +321,14 @@ const MessageChunk = React.memo(function MessageChunk({
       const prevMsg = prevIdx >= 0 ? allMessages[prevIdx] : null;
       const prevTime = prevMsg ? (getMessageTimestamp(prevMsg) || 0) : 0;
       const currTime = getMessageTimestamp(msg) || 0;
-      if (!prevMsg || Math.abs(currTime - prevTime) > TIME_GAP_MS) showSeparator = true;
+      if (!prevMsg || Math.abs(currTime - prevTime) > SEPARATOR_GAP_MS) showSeparator = true;
     }
 
     if (showSeparator) {
       const ts = getMessageTimestamp(msg) || 0;
       items.push(
         <div key={`sep-${globalIdx}`} className="time-separator">
-          {ts ? formatMessageSeparatorDate(ts) : ''}
+          {ts ? formatChatTimestamp(ts) : ''}
         </div>
       );
     }
@@ -325,7 +341,9 @@ const MessageChunk = React.memo(function MessageChunk({
     if (prevIdx >= 0 && !showSeparator) {
       const prevMsg = allMessages[prevIdx];
       const prevSender = prevMsg.senderName || prevMsg.sender_name || 'Unknown';
-      if (prevSender !== sender) isFirstInClump = true;
+      const prevTime = getMessageTimestamp(prevMsg) || 0;
+      const currTime = getMessageTimestamp(msg) || 0;
+      if (prevSender !== sender || Math.abs(currTime - prevTime) >= GROUP_GAP_MS) isFirstInClump = true;
     }
 
     let isLastInClump = true;
@@ -335,7 +353,8 @@ const MessageChunk = React.memo(function MessageChunk({
       const nextSender = nextMsg.senderName || nextMsg.sender_name || 'Unknown';
       const currTime = getMessageTimestamp(msg) || 0;
       const nextTime = getMessageTimestamp(nextMsg) || 0;
-      if (nextSender === sender && Math.abs(nextTime - currTime) <= TIME_GAP_MS) {
+      const nextStartsSeparator = Math.abs(nextTime - currTime) > SEPARATOR_GAP_MS;
+      if (nextSender === sender && !nextStartsSeparator && Math.abs(nextTime - currTime) < GROUP_GAP_MS) {
         isLastInClump = false;
       }
     }
@@ -355,6 +374,10 @@ const MessageChunk = React.memo(function MessageChunk({
         isLastInClump={isLastInClump}
         onMediaClick={onMediaClick}
         onLinkClick={onLinkClick}
+        overlayAvailable={overlayAvailable}
+        isFavorite={favoritesByIndex.has(globalIdx)}
+        selectionActive={selectionActive}
+        selected={selectedIndices.has(globalIdx)}
       />
     );
   });
@@ -394,17 +417,23 @@ const MessageListBase = forwardRef<MessageListHandle, MessageListProps>(function
 ) {
   const chatData = useThreadData(providedThread);
   const reactionFeature = useReactionContext();
+  const overlay = useOverlayContext();
+  const messageSelection = useMessageSelectionContext();
+  // The overlay follows the open thread; ignore it while another thread is shown.
+  const overlaySynced = overlay.available && overlay.messageIds.length === (chatData?.messages.length ?? -1);
+  const deletedMask = overlaySynced && overlay.deletedMask.length > 0 ? overlay.deletedMask : null;
   const [revealed, setRevealed] = React.useState<{ data: MessengerThread | null; hide: boolean; indices: Set<number> }>({ data: null, hide: false, indices: new Set() });
   const visibility = React.useMemo(() => {
     const messages = chatData?.messages || [];
-    const result = new Uint8Array(messages.length);
+    // Soft-deleted messages stay hidden even when a jump reveals a notice.
+    const result = deletedMask ? Uint8Array.from(deletedMask) : new Uint8Array(messages.length);
     if (!reactionFeature.hide) return result;
     const exceptions = revealed.data === chatData && revealed.hide === reactionFeature.hide ? revealed.indices : null;
     for (let index = 0; index < messages.length; index++) {
-      if (!exceptions?.has(index) && isReactionNoticeMessage(messages[index])) result[index] = 1;
+      if (!result[index] && !exceptions?.has(index) && isReactionNoticeMessage(messages[index])) result[index] = 1;
     }
     return result;
-  }, [chatData, reactionFeature.hide, revealed]);
+  }, [chatData, deletedMask, reactionFeature.hide, revealed]);
   const neighbors = React.useMemo(() => getVisibleMessageNeighbors(visibility), [visibility]);
   // A fresh token for each loaded thread keeps snapshot comparisons cheap.
   const threadIdentity = React.useMemo(() => ({ threadPath: chatData?.thread_path }), [chatData]);
@@ -412,8 +441,11 @@ const MessageListBase = forwardRef<MessageListHandle, MessageListProps>(function
   const chunks = React.useMemo(() => chatData ? chunkArray(chatData.messages, CHUNK_SIZE) : [], [chatData]);
   const chunkMessageData = React.useMemo(() => ({ allMessages: chatData?.messages || [], chunks, visibility, neighbors }), [chatData, chunks, visibility, neighbors]);
   React.useEffect(() => {
-    onHiddenCountChange?.(visibility.reduce((sum, value) => sum + value, 0));
-  }, [visibility, onHiddenCountChange]);
+    // Report reaction notices only; deleted messages have their own panel.
+    let hidden = 0;
+    for (let index = 0; index < visibility.length; index++) if (visibility[index] && !deletedMask?.[index]) hidden++;
+    onHiddenCountChange?.(hidden);
+  }, [visibility, deletedMask, onHiddenCountChange]);
   React.useEffect(() => {
     setRevealed(prev => prev.indices.size > 0 && (prev.data !== chatData || prev.hide !== reactionFeature.hide) ? { data: chatData, hide: reactionFeature.hide, indices: new Set() } : prev);
   }, [chatData, reactionFeature.hide]);
@@ -549,6 +581,7 @@ const MessageListBase = forwardRef<MessageListHandle, MessageListProps>(function
         requestId === jumpRequestIdRef.current && container === chatContainerRef.current
       );
       const chunkIndex = Math.floor(index / CHUNK_SIZE);
+      if (deletedMask?.[index]) return;
       if (visibility[index] && chatData) {
         setRevealed(prev => ({ data: chatData, hide: reactionFeature.hide, indices: new Set([...(prev.data === chatData && prev.hide === reactionFeature.hide ? prev.indices : []), index]) }));
         await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
@@ -631,7 +664,7 @@ const MessageListBase = forwardRef<MessageListHandle, MessageListProps>(function
         resetChatScrollAnchor(container);
       }
     },
-  }), [beginJumpSettling, cancelPendingChunkRender, chatData, clearJumpHighlight, clearJumpSettling, mediaState, renderChunk, visibility, reactionFeature.hide]);
+  }), [beginJumpSettling, cancelPendingChunkRender, chatData, clearJumpHighlight, clearJumpSettling, mediaState, renderChunk, visibility, deletedMask, reactionFeature.hide]);
 
   const handleScroll = useCallback(() => {
     if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
@@ -765,12 +798,30 @@ const MessageListBase = forwardRef<MessageListHandle, MessageListProps>(function
   const handleChunkHeightMeasured = useCallback((chunkIndex: number, height: number) => {
     chunkHeights.values.set(chunkIndex, height);
   }, [chunkHeights]);
+  const favoritesByIndex = overlaySynced ? overlay.favoritesByIndex : EMPTY_FAVORITES;
   const chunkViewData = React.useMemo(() => ({
     selectedPerspective, settings, mediaState, highlightQuery, chatContainerRef,
     onMediaClick, onLinkClick, onRendered: handleChunkRendered,
     onHeightMeasured: handleChunkHeightMeasured, getChunkHeight, lastVisibleChunk, forcedChunkIndex,
+    overlayAvailable: overlaySynced,
+    favoritesByIndex,
+    selectionActive: messageSelection.active,
+    selectedIndices: messageSelection.selected,
   }), [selectedPerspective, settings, mediaState, highlightQuery, onMediaClick, onLinkClick,
-    handleChunkRendered, handleChunkHeightMeasured, getChunkHeight, lastVisibleChunk, forcedChunkIndex]);
+    handleChunkRendered, handleChunkHeightMeasured, getChunkHeight, lastVisibleChunk, forcedChunkIndex,
+    overlaySynced, favoritesByIndex, messageSelection.active, messageSelection.selected]);
+
+  const latestActionStateRef = useRef({ overlay, messageSelection, visibility });
+  latestActionStateRef.current = { overlay, messageSelection, visibility };
+  const messageActions = React.useMemo<MessageActions>(() => ({
+    toggleFavorite: index => latestActionStateRef.current.overlay.toggleFavorite(index),
+    deleteMessage: index => latestActionStateRef.current.overlay.deleteMessages([index]),
+    startSelection: index => latestActionStateRef.current.messageSelection.start(index),
+    // Shift+click ranges skip hidden messages: deleted ones and reaction notices.
+    toggleSelected: (index, range) => latestActionStateRef.current.messageSelection.toggle(
+      index, range, candidate => !latestActionStateRef.current.visibility[candidate],
+    ),
+  }), []);
   const renderGroups = React.useMemo(() => Array.from({ length: Math.ceil(chunks.length / CHUNKS_PER_RENDER_GROUP) }, (_, index) => index * CHUNKS_PER_RENDER_GROUP), [chunks.length]);
 
   if (!chatData) return null;
@@ -781,6 +832,7 @@ const MessageListBase = forwardRef<MessageListHandle, MessageListProps>(function
       ref={chatContainerRef}
       aria-busy={opening}
       data-opening={opening ? 'true' : undefined}
+      data-selecting={messageSelection.active ? 'true' : undefined}
       onScroll={handleScroll}
       onWheel={clearJumpSettling}
       onTouchStart={clearJumpSettling}
@@ -789,6 +841,7 @@ const MessageListBase = forwardRef<MessageListHandle, MessageListProps>(function
     >
       {opening && <div className="chat-opening-status" role="status">Preparing messages...</div>}
       {lastVisibleChunk < 0 && <div className="reaction-empty-chat">All messages are hidden. <button type="button" onClick={reactionFeature.showAll}>Show all</button></div>}
+      <MessageActionsContext value={messageActions}>
       <ChunkMessageContext value={chunkMessageData}>
       <ChunkViewContext value={chunkViewData}>
       <ReactionVisibilityAnchor data={threadIdentity} getVisibility={getVisibility} containerRef={chatContainerRef}>
@@ -798,6 +851,7 @@ const MessageListBase = forwardRef<MessageListHandle, MessageListProps>(function
       </ReactionVisibilityAnchor>
       </ChunkViewContext>
       </ChunkMessageContext>
+      </MessageActionsContext>
     </div>
   );
 });

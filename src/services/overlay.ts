@@ -73,25 +73,35 @@ export interface AppliedOverlay {
   favoritesByIndex: Map<number, OverlayFavorite>;
 }
 
-export function applyOverlay(messageIds: readonly string[], overlay: Overlay | null): AppliedOverlay {
-  const deletedMask = new Uint8Array(messageIds.length);
-  const favoritesByIndex = new Map<number, OverlayFavorite>();
-  let deletedCount = 0;
-  if (!overlay || (overlay.deleted.length === 0 && overlay.favorites.length === 0)) {
-    return { deletedMask, deletedCount, favoritesByIndex };
-  }
-  const deleted = new Set(overlay.deleted);
-  const favorites = new Map(overlay.favorites.map(favorite => [favorite.id, favorite]));
+export function getDeletedMask(messageIds: readonly string[], deleted: readonly string[]): Uint8Array {
+  const mask = new Uint8Array(messageIds.length);
+  if (deleted.length === 0) return mask;
+  const ids = new Set(deleted);
   for (let index = 0; index < messageIds.length; index++) {
-    const id = messageIds[index];
-    if (deleted.has(id)) {
-      deletedMask[index] = 1;
-      deletedCount++;
-    }
-    const favorite = favorites.get(id);
-    if (favorite) favoritesByIndex.set(index, favorite);
+    if (ids.has(messageIds[index])) mask[index] = 1;
   }
-  return { deletedMask, deletedCount, favoritesByIndex };
+  return mask;
+}
+
+export function getFavoritesByIndex(
+  messageIds: readonly string[],
+  favorites: readonly OverlayFavorite[]
+): Map<number, OverlayFavorite> {
+  const result = new Map<number, OverlayFavorite>();
+  if (favorites.length === 0) return result;
+  const byId = new Map(favorites.map(favorite => [favorite.id, favorite]));
+  for (let index = 0; index < messageIds.length; index++) {
+    const favorite = byId.get(messageIds[index]);
+    if (favorite) result.set(index, favorite);
+  }
+  return result;
+}
+
+export function applyOverlay(messageIds: readonly string[], overlay: Overlay | null): AppliedOverlay {
+  const deletedMask = getDeletedMask(messageIds, overlay?.deleted ?? []);
+  let deletedCount = 0;
+  for (let index = 0; index < deletedMask.length; index++) deletedCount += deletedMask[index];
+  return { deletedMask, deletedCount, favoritesByIndex: getFavoritesByIndex(messageIds, overlay?.favorites ?? []) };
 }
 
 function touch(overlay: Overlay, changes: Partial<Overlay>, now: number): Overlay {

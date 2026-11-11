@@ -17,13 +17,15 @@ import { useReactionContext } from '../../hooks/useReactionFeature';
 import { highlightText } from '../../services/search';
 import { escapeHtml } from '../../services/storage';
 import { getMessageLinks, MESSAGE_URL_PATTERN, normalizeExternalUrl, trimTrailingUrlPunctuation } from '../../services/messageLinks';
-import { formatMessageSeparatorDate } from '../../services/dateTime';
+import { formatChatTimestamp } from '../../services/dateTime';
+import { getAvatarHue, getAvatarInitials, useMessageActions } from './messageActions';
+import { FAILED_MEDIA_LABEL } from '../../services/search';
 import { getMessageBump } from '../../services/messageBump';
 import { ReactionModal } from './ReactionModal';
 import { registerChatAnchorCandidate, stabilizeChatScrollAnchor } from './chatScrollAnchoring';
 import { MediaFileSize } from '../MediaFileSize';
 import { UnavailableAttachment } from '../UnavailableAttachment';
-import { FileText, Image as ImageIcon, Info, Link as LinkIcon, Music2, Pause, Play, Video, Volume2, VolumeX } from 'lucide-react';
+import { FileText, Image as ImageIcon, Info, Link as LinkIcon, Music2, Pause, Play, Square, SquareCheck, Star, Trash2, Video, Volume2, VolumeX } from 'lucide-react';
 
 const lazyMediaVisibleCallbacks = new Map<Element, (inside: boolean) => void>();
 const lazyMediaPreloadCallbacks = new Map<Element, (inside: boolean) => void>();
@@ -117,11 +119,17 @@ interface MessageBubbleProps {
   isLastInClump: boolean;
   onMediaClick?: (mediaPath: string, msgIndex: number) => void;
   onLinkClick?: (url: string, msgIndex: number) => void;
+  /** Favorite, delete and selection controls; only standalone Messenger chats have an overlay. */
+  overlayAvailable?: boolean;
+  isFavorite?: boolean;
+  selectionActive?: boolean;
+  selected?: boolean;
 }
 
 function formatTimestamp(ts: number): string {
-  return formatMessageSeparatorDate(ts);
+  return formatChatTimestamp(ts);
 }
+
 
 
 function renderHighlightedText(text: string, highlightQuery: string, key: string) {
@@ -851,8 +859,14 @@ export const MessageBubble = memo(function MessageBubble({
   isLastInClump,
   onMediaClick,
   onLinkClick,
+  overlayAvailable = false,
+  isFavorite = false,
+  selectionActive = false,
+  selected = false,
 }: MessageBubbleProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const actions = useMessageActions();
+  const selecting = overlayAvailable && selectionActive;
   const messageRef = useRef<HTMLDivElement | null>(null);
   const mediaGridRef = useRef<HTMLDivElement | null>(null);
   const mediaGridPrevHeight = useRef<number | null>(null);
@@ -907,20 +921,87 @@ export const MessageBubble = memo(function MessageBubble({
     uniqueEmojis = Array.from(new Set(msg.reactions!.map(r => r.reaction))).slice(0, 3);
   }
 
+  const toggleSelected = (event: React.MouseEvent | React.KeyboardEvent) => actions.toggleSelected(msgIndex, event.shiftKey);
+
   return (
-    <div className={`message-wrapper ${isMe ? 'from-me-wrapper' : 'from-them-wrapper'}`}>
+    <div
+      className={`message-wrapper ${isMe ? 'from-me-wrapper' : 'from-them-wrapper has-avatar-slot'}${selecting ? ' selecting' : ''}${selected ? ' selected' : ''}`}
+      onClickCapture={selecting ? event => {
+        // In selection mode a click anywhere on the row selects instead of opening media.
+        event.preventDefault();
+        event.stopPropagation();
+        toggleSelected(event);
+      } : undefined}
+    >
       <div className="time-separator mobile-msg-timestamp" aria-hidden="true" />
+      {selecting && (
+        <button
+          type="button"
+          className="message-select-toggle"
+          role="checkbox"
+          aria-checked={selected}
+          aria-label={selected ? 'Bỏ chọn tin nhắn' : 'Chọn tin nhắn'}
+          onKeyDown={event => {
+            if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); toggleSelected(event); }
+          }}
+        >
+          {selected ? <SquareCheck size={18} aria-hidden="true" /> : <Square size={18} aria-hidden="true" />}
+        </button>
+      )}
       {showName && isFirstInClump && (
         <div className="sender-name">{sender}</div>
       )}
       <div
         ref={messageRef}
-        className={`message ${isMe ? 'from-me' : 'from-them'} ${isFirstInClump ? 'clump-first' : ''} ${isLastInClump ? 'clump-last' : ''} ${hasReactions ? 'has-reactions' : ''} ${hasMediaPreview ? 'has-media-preview' : ''} ${hasMediaGrid ? 'has-media-grid' : ''} ${hasOddMediaGrid ? 'has-odd-media-grid' : ''} ${isMediaOnly ? 'media-only' : ''}`}
+        className={`message ${isMe ? 'from-me' : 'from-them'} ${isFirstInClump ? 'clump-first' : ''} ${isLastInClump ? 'clump-last' : ''} ${hasReactions ? 'has-reactions' : ''} ${hasMediaPreview ? 'has-media-preview' : ''} ${hasMediaGrid ? 'has-media-grid' : ''} ${hasOddMediaGrid ? 'has-odd-media-grid' : ''} ${isMediaOnly ? 'media-only' : ''}${overlayAvailable && !selecting ? ' has-message-tools' : ''}${isFavorite ? ' is-favorite' : ''}`}
         data-msg-index={msgIndex}
       >
+        {!isMe && isLastInClump && (
+          <span
+            className="message-avatar"
+            aria-hidden="true"
+            title={sender}
+            style={{ '--avatar-hue': getAvatarHue(sender) } as React.CSSProperties}
+          >
+            {getAvatarInitials(sender)}
+          </span>
+        )}
+        {isFavorite && <Star className="message-favorite-badge" size={12} aria-label="Đã favorite" />}
+        {overlayAvailable && !selecting && (
+          <div className="message-tools">
+            <button
+              type="button"
+              className={`message-tool${isFavorite ? ' active' : ''}`}
+              aria-label={isFavorite ? 'Bỏ favorite' : 'Favorite'}
+              aria-pressed={isFavorite}
+              title={isFavorite ? 'Bỏ favorite' : 'Favorite'}
+              onClick={() => actions.toggleFavorite(msgIndex)}
+            >
+              <Star size={15} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="message-tool"
+              aria-label="Xóa tin nhắn"
+              title="Xóa (ẩn khỏi chat, file gốc giữ nguyên)"
+              onClick={() => actions.deleteMessage(msgIndex)}
+            >
+              <Trash2 size={15} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="message-tool"
+              aria-label="Chọn nhiều tin"
+              title="Chọn nhiều tin"
+              onClick={() => actions.startSelection(msgIndex)}
+            >
+              <SquareCheck size={15} aria-hidden="true" />
+            </button>
+          </div>
+        )}
         <div className="message-content">
         {msg.is_unsent ? (
-          <span className="msg-unsent">Message unsent</span>
+          <em className="msg-unsent">Tin nhắn đã bị thu hồi</em>
         ) : (
           <>
             {bumpedMessage && (
@@ -998,7 +1079,8 @@ export const MessageBubble = memo(function MessageBubble({
             {Array.from({ length: msg.failedMediaCount || 0 }, (_, index) => (
               <UnavailableAttachment
                 key={`failed-download:${index}`}
-                label="Failed to download media. Attachment type unknown."
+                label={`⚠ ${FAILED_MEDIA_LABEL}`}
+                caption={`⚠ ${FAILED_MEDIA_LABEL}`}
                 failedDownload
                 className="placeholder media-unavailable-placeholder media-download-failed"
               />
@@ -1036,7 +1118,7 @@ export const MessageBubble = memo(function MessageBubble({
           </>
         )}
 
-        <div className="msg-timestamp">
+        <div className="msg-timestamp" title={timestamp ? formatChatTimestamp(timestamp) : undefined}>
           {timestamp ? formatTimestamp(timestamp) : ''}
         </div>
         </div>

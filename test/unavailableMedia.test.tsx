@@ -28,7 +28,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const failedLabel = 'Failed to download media. Attachment type unknown.';
+const failedLabel = '⚠ Media tải lỗi';
 function thread() {
   return parseMessengerExportJson(JSON.stringify({
     threadName: 'Chat', participants: ['Alice', 'Bob'],
@@ -98,7 +98,7 @@ describe('unavailable attachments', () => {
     const { container } = render(<MessageBubble {...bubbleProps} msg={{ sender_name: 'Alice', timestamp_ms: 1,
       is_unsent: true, bumped_message_metadata: { is_bumped: true, bumped_message: 'Removed quote' },
     }} />);
-    expect(screen.getByText('Message unsent')).toBeTruthy();
+    expect(screen.getByText('Tin nhắn đã bị thu hồi')).toBeTruthy();
     expect(screen.queryByText('Bumped a message')).toBeNull();
     expect(container.querySelector('blockquote')).toBeNull();
   });
@@ -194,7 +194,7 @@ describe('unavailable attachments', () => {
 
   it('does not show attachments on an unsent message', () => {
     render(<MessageBubble {...bubbleProps} msg={{ ...thread().messages[0], is_unsent: true }} />);
-    expect(screen.getByText('Message unsent')).toBeTruthy();
+    expect(screen.getByText('Tin nhắn đã bị thu hồi')).toBeTruthy();
     expect(screen.queryByRole('img', { name: failedLabel })).toBeNull();
   });
 
