@@ -29,6 +29,7 @@ import { ParentBackButton } from './components/Navigation/ParentBackButton';
 import { ENABLE_CONTEXTUAL_BACK_NAVIGATION } from './config/uiFeatures';
 import { TrustModal } from './components/Modals/TrustModal';
 import { ReloadPrompt } from './components/ReloadPrompt';
+import { isAndroidApp } from './config/platform';
 import { DeleteConfirmModal } from './components/Modals/DeleteConfirmModal';
 import type { ChatListEntry, SelectableItem } from './types/messenger';
 import { isFileSystemAccessSupported } from './services/fileSystem';
@@ -492,7 +493,7 @@ export default function App() {
           </button>
           <button type="button" className="jump-return-dismiss" aria-label="Dismiss return action" onClick={() => navigation.dismissJumpReturn()}><X size={16} /></button>
         </div>}
-        {settings.offlineSupportEnabled && (
+        {!isAndroidApp() && settings.offlineSupportEnabled && (
           <ReloadPrompt canAutoReload={!archive.rootHandle && !archive.loading} />
         )}
         {overlay.undo && (
