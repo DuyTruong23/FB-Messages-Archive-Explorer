@@ -267,6 +267,8 @@ test('opens a Facebook archive and wires chat, search, gallery, and pinning', as
   await search.press('Enter');
   await expect(page.getByRole('listbox', { name: 'Search results' })).toContainText('needle from Facebook');
 
+  // The options button appears on hover; search results can move the row away from the pointer.
+  await chat.hover();
   await chat.getByRole('button', { name: 'Chat options' }).click();
   await page.getByRole('button', { name: 'Pin to top' }).click();
   await expect(chat.getByLabel('Pinned chat')).toBeVisible();

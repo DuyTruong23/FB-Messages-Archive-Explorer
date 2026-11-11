@@ -121,6 +121,35 @@ ZIP downloads support at most 65,535 files and 4 GiB. In Chromium browsers, use 
 - Show or hide sender names and reactions
 - Resize the sidebar and statistics panel by dragging
 
+**Message Edits (standalone Messenger exports)**
+
+- Hide messages (soft delete) one at a time or with checkboxes; Shift+click selects a range. **Undo** appears after each deletion, and the **Đã xóa** panel restores messages.
+- Favorite messages with ☆ on hover, add an optional note, and open the **Favorites** panel to jump to them.
+- **Export bản sạch** writes `<thread>.cleaned.json` without the hidden messages. The original file is unchanged.
+- The participant chosen as "me" (View perspective) is remembered per conversation.
+
+Edits are stored in `<thread>.overlay.json` beside the conversation file. The app never writes the conversation JSON or the `media/` folder; it can only create files ending in `.overlay.json` or `.cleaned.json`, and it skips those files when listing chats. Without write access (read-only folder, Firefox, Safari), edits are kept in the browser's IndexedDB, and **Export overlay** downloads them. **Cho phép ghi file** in either panel requests write access and moves the edits into the overlay file. Message identity is a hash of timestamp, sender, and position in the file, so an overlay applies only to the same export file.
+
+Overlay file format:
+
+```json
+{
+  "version": 1,
+  "sourceFile": "Thanh Dii_0.json",
+  "deleted": ["<messageId>"],
+  "favorites": [{ "id": "<messageId>", "addedAt": 1794366226000, "note": "" }],
+  "settings": { "me": "Quoc Duy" },
+  "updatedAt": 1794366226000
+}
+```
+
+**Advanced Search**
+
+- In "Chat" mode, results update 200 ms after typing. The count and ▲/▼ buttons step through results.
+- The filter button (⚙) adds sender, date range (Hôm nay, 7 ngày, 30 ngày, a month or year, or exact from/to), media, link, and favorite filters. Filters alone, with an empty query, also list messages.
+- Accent-insensitive matching is on by default ("loi" finds "lỗi", "LỖI", "lôi"); turn it off to match accents exactly. "All" mode applies only this option.
+- Hidden (soft-deleted) messages never appear in results. Failed downloads are searchable as "Media tải lỗi".
+
 **Archive Management (optional)**
 
 - Select one or more conversations and delete them permanently from your exported archive
@@ -368,7 +397,7 @@ The production browser command builds before starting preview. To run selected c
 - You can revoke access at any time by closing the tab or refreshing the page.
 - Settings (dark mode, panel widths, etc.) are saved in `localStorage` on your computer, with a cookie fallback if `localStorage` is unavailable. No settings data is sent anywhere.
 - There are no analytics, telemetry, or third-party scripts.
-- Write access to your archive is only requested if you enable chat deletion in Settings.
+- Write access to your archive is only requested if you enable chat deletion or bookmarking in Settings, or press **Cho phép ghi file** to save message edits.
 - The source code is fully open and can be audited.
 
 ---

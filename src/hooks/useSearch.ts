@@ -96,6 +96,25 @@ export function useSearch(
     }
   }, [chatData]);
 
+  // Build the open chat's index while the browser is idle so the first search
+  // does not pay for normalizing every message (about 0.2 s for 49k messages).
+  useEffect(() => {
+    if (!chatData?.messages?.length) return;
+    const build = () => {
+      if (indexCacheRef.current.data === chatData && indexCacheRef.current.index.length) return;
+      indexCacheRef.current = {
+        data: chatData,
+        index: buildSearchIndex(chatData.messages, hideNotices && !standalone ? isReactionNoticeMessage : () => false),
+      };
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(build, { timeout: 3000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const timer = setTimeout(build, 1000);
+    return () => clearTimeout(timer);
+  }, [chatData, hideNotices, standalone]);
+
   const startSearch = useCallback(async (searchQuery: string) => {
     if (!searchQuery.trim() && !filterActive) return;
 
