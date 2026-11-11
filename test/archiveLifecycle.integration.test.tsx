@@ -82,8 +82,9 @@ describe('archive lifecycle integration', () => {
     act(() => { pending = result.current.openFolder(false, undefined, accessMode); });
     await waitFor(() => expect(started).toHaveLength(4));
     expect(peak).toBe(4);
+    // `started` is not React state, so the loading render may not be committed yet.
+    await waitFor(() => expect(result.current.loading).toBe(true));
     expect(result.current.inboxList).toEqual([]);
-    expect(result.current.loading).toBe(true);
     act(() => releases[started[0]]());
     await waitFor(() => expect(started).toHaveLength(5));
     expect(result.current.inboxList).toEqual([]);
