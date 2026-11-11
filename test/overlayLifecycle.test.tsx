@@ -139,6 +139,31 @@ describe('useOverlay', () => {
     expect(sha256(await readText(directory, SOURCE))).toBe(before);
   });
 
+  it('favorites a selection and saves it as a conversation beside the source', async () => {
+    const { directory, thread, entry } = setup();
+    const { result } = renderHook(() => useOverlay(entry, thread));
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    act(() => {
+      result.current.setMe('Quoc Duy');
+      result.current.setFavorites([0, 3, 4], true);
+      result.current.deleteMessages([4]);
+    });
+    expect([...result.current.favoriteIndices].sort()).toEqual([0, 3, 4]);
+    let exported: Awaited<ReturnType<typeof result.current.exportFavorites>> | undefined;
+    await act(async () => { exported = await result.current.exportFavorites(); });
+    // The deleted favorite stays out of the file.
+    expect(exported).toEqual({ fileName: 'Thanh Dii_0.favorites.json', count: 2, mode: 'file' });
+    const saved = JSON.parse(await readText(directory, 'Thanh Dii_0.favorites.json'));
+    expect(saved.threadName).toBe('Thanh Dii (Favorites)');
+    expect(saved.messages.map((message: { text: string }) => message.text)).toEqual(['tin 3', 'tin 0']);
+    const favoritesOverlay = JSON.parse(await readText(directory, 'Thanh Dii_0.favorites.overlay.json'));
+    expect(favoritesOverlay.settings).toEqual({ me: 'Quoc Duy' });
+    expect(sha256(await readText(directory, SOURCE))).toBe(sha256(RAW));
+
+    act(() => result.current.setFavorites([0, 3], false));
+    expect([...result.current.favoriteIndices]).toEqual([4]);
+  });
+
   it('falls back to memory without write access or IndexedDB', async () => {
     const { thread, entry } = setup();
     const readOnly = {

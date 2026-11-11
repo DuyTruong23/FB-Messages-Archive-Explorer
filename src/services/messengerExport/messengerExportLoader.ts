@@ -61,6 +61,46 @@ function describeLastMessage(thread: MessengerThread): { lastMessage?: string; l
   };
 }
 
+export function createMessengerExportEntry(
+  handle: ReadableDirectoryHandle,
+  name: string,
+  size: number,
+  thread: MessengerThread,
+  last: { lastMessage?: string; lastTimestamp?: number } = describeLastMessage(thread),
+): ChatListEntry {
+  return {
+    folderName: jsonStem(name),
+    title: thread.title || jsonStem(name),
+    participants: (thread.participants || []).map(participant => participant.name).filter(Boolean),
+    lastMessage: last.lastMessage,
+    lastTimestamp: last.lastTimestamp,
+    messageCount: thread.messages?.length || 0,
+    folderSize: size,
+    dirHandle: handle,
+    jsonFileCount: 1,
+    source: 'inbox',
+    _messengerExport: true,
+    _jsonFileName: name,
+    _sizeIncludesMedia: false,
+  };
+}
+
+/** Read one conversation file into a chat list entry; null if it is not a conversation. */
+export async function loadMessengerExportEntry(handle: ReadableDirectoryHandle, name: string): Promise<ChatListEntry | null> {
+  const file = await (await handle.getFileHandle(name)).getFile();
+  const classification = classifyMessengerExportJson(await file.text());
+  return classification.kind === 'conversation'
+    ? createMessengerExportEntry(handle, name, file.size, classification.thread)
+    : null;
+}
+
+export function compareChatsByRecency(a: ChatListEntry, b: ChatListEntry): number {
+  if (a.lastTimestamp == null && b.lastTimestamp == null) return 0;
+  if (a.lastTimestamp == null) return 1;
+  if (b.lastTimestamp == null) return -1;
+  return b.lastTimestamp - a.lastTimestamp;
+}
+
 export interface MessengerExportListingResult {
   entries: ChatListEntry[];
   sizeMetadata: MessengerExportSizeMetadata;
@@ -126,21 +166,7 @@ export async function listMessengerExportChatsIndexed(
           if (index) addConversationToChatIndex(index, name, file.size, thread);
           else addConversationToSizeMetadata(metadata, name, file.size, thread);
 
-          const entry: ChatListEntry = {
-            folderName: jsonStem(name),
-            title: thread.title || jsonStem(name),
-            participants: (thread.participants || []).map(participant => participant.name).filter(Boolean),
-            lastMessage,
-            lastTimestamp,
-            messageCount: thread.messages?.length || 0,
-            folderSize: file.size,
-            dirHandle: handle,
-            jsonFileCount: 1,
-            source: 'inbox',
-            _messengerExport: true,
-            _jsonFileName: name,
-            _sizeIncludesMedia: false,
-          };
+          const entry = createMessengerExportEntry(handle, name, file.size, thread, { lastMessage, lastTimestamp });
           // Retain only metadata and reference summaries, never the full thread.
           return { kind: 'conversation', entry, metadata, index } as const;
         }
@@ -168,12 +194,7 @@ export async function listMessengerExportChatsIndexed(
       }
     }
 
-    entries.sort((a, b) => {
-      if (a.lastTimestamp == null && b.lastTimestamp == null) return 0;
-      if (a.lastTimestamp == null) return 1;
-      if (b.lastTimestamp == null) return -1;
-      return b.lastTimestamp - a.lastTimestamp;
-    });
+    entries.sort(compareChatsByRecency);
 
     return { entries, sizeMetadata, chatIndex };
   } finally { options.ownershipSignal?.removeEventListener('abort', cancelOwnership); }

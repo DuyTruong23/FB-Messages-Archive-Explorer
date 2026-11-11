@@ -2,10 +2,21 @@ import type { Overlay, OverlayFavorite } from '../types/overlay';
 import type { ReadableDirectoryHandle, WritableDirectoryHandle } from '../types/fileSystem';
 
 const DERIVED_FILE_PATTERN = /\.(overlay|cleaned)\.json$/i;
+const WRITABLE_FILE_PATTERN = /\.(overlay|cleaned|favorites)\.json$/i;
+export const FAVORITES_TITLE_SUFFIX = ' (Favorites)';
 
 /** Overlay and cleaned files sit beside conversations but are not conversations. */
 export function isOverlayArtifactFileName(name: string): boolean {
   return DERIVED_FILE_PATTERN.test(name);
+}
+
+/** Files this feature may create. Favorites files are conversations and stay listed. */
+export function isWritableDerivedFileName(name: string): boolean {
+  return WRITABLE_FILE_PATTERN.test(name);
+}
+
+export function getFavoritesFileName(jsonFileName: string): string {
+  return jsonFileName.replace(/\.json$/i, '') + '.favorites.json';
 }
 
 export function getOverlayFileName(jsonFileName: string): string {
@@ -127,6 +138,18 @@ export function toggleFavorite(overlay: Overlay, id: string, now = Date.now()): 
   }, now);
 }
 
+/** Add or remove several favorites at once; existing favorites keep their note and date. */
+export function setMessagesFavorite(overlay: Overlay, ids: readonly string[], favorite: boolean, now = Date.now()): Overlay {
+  const existing = new Set(overlay.favorites.map(item => item.id));
+  if (favorite) {
+    const additions = [...new Set(ids)].filter(id => !existing.has(id)).map(id => ({ id, addedAt: now, note: '' }));
+    return additions.length === 0 ? overlay : touch(overlay, { favorites: [...overlay.favorites, ...additions] }, now);
+  }
+  const removed = new Set(ids);
+  const favorites = overlay.favorites.filter(item => !removed.has(item.id));
+  return favorites.length === overlay.favorites.length ? overlay : touch(overlay, { favorites }, now);
+}
+
 export function setFavoriteNote(overlay: Overlay, id: string, note: string, now = Date.now()): Overlay {
   const current = overlay.favorites.find(favorite => favorite.id === id);
   if (!current || current.note === note) return overlay;
@@ -163,11 +186,11 @@ export async function readOverlayFile(directory: ReadableDirectoryHandle, jsonFi
 
 /**
  * The only write path of this feature. It refuses every name except
- * `*.overlay.json` and `*.cleaned.json`, so a conversation file cannot be
- * replaced even by a caller mistake.
+ * `*.overlay.json`, `*.cleaned.json` and `*.favorites.json`, so an exported
+ * conversation file cannot be replaced even by a caller mistake.
  */
 async function writeDerivedFile(directory: WritableDirectoryHandle, name: string, content: string): Promise<void> {
-  if (!isOverlayArtifactFileName(name)) throw new Error(`Refusing to write "${name}": not an overlay or cleaned file.`);
+  if (!isWritableDerivedFileName(name)) throw new Error(`Refusing to write "${name}": not an overlay, cleaned or favorites file.`);
   const handle = await directory.getFileHandle(name, { create: true });
   const writable = await handle.createWritable();
   await writable.write(content);
@@ -180,6 +203,41 @@ export function writeOverlayFile(directory: WritableDirectoryHandle, overlay: Ov
 
 export function writeCleanedFile(directory: WritableDirectoryHandle, jsonFileName: string, content: string): Promise<void> {
   return writeDerivedFile(directory, getCleanedFileName(jsonFileName), content);
+}
+
+export function writeFavoritesFile(directory: WritableDirectoryHandle, jsonFileName: string, content: string): Promise<void> {
+  return writeDerivedFile(directory, getFavoritesFileName(jsonFileName), content);
+}
+
+/**
+ * A conversation in the source's own format holding only the favorite
+ * messages, in source order. Media paths stay valid because the file sits
+ * beside the source. Notes are kept in `favoriteNotes`, indexed by position
+ * in the new `messages` array; the viewer ignores the extra field.
+ */
+export function buildFavoritesJson(rawContent: string, favoritesBySourceIndex: ReadonlyMap<number, OverlayFavorite>): { content: string; count: number } {
+  const raw = JSON.parse(rawContent) as { messages?: unknown[]; threadName?: unknown };
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.messages)) {
+    throw new Error('The conversation file has no message list.');
+  }
+  const messages: unknown[] = [];
+  const favoriteNotes: { index: number; addedAt: number; note: string }[] = [];
+  raw.messages.forEach((message, sourceIndex) => {
+    const favorite = favoritesBySourceIndex.get(sourceIndex);
+    if (!favorite) return;
+    if (favorite.note) favoriteNotes.push({ index: messages.length, addedAt: favorite.addedAt, note: favorite.note });
+    messages.push(message);
+  });
+  const title = typeof raw.threadName === 'string' ? raw.threadName : 'conversation';
+  return {
+    content: JSON.stringify({
+      ...raw,
+      threadName: title.endsWith(FAVORITES_TITLE_SUFFIX) ? title : title + FAVORITES_TITLE_SUFFIX,
+      messages,
+      ...(favoriteNotes.length > 0 ? { favoriteNotes } : {}),
+    }, null, 2) + '\n',
+    count: messages.length,
+  };
 }
 
 /**

@@ -187,6 +187,11 @@ export default function App() {
     await loadChatEntry(entry);
   }, [navigation, loadChatEntry, chat.activeEntry, chat.chatData, hideGallery]);
 
+  const { upsertMessengerChat } = archive;
+  const handleFavoritesFileSaved = useCallback((fileName: string) => (
+    chat.activeEntry ? upsertMessengerChat(chat.activeEntry.dirHandle, fileName) : Promise.resolve(null)
+  ), [chat.activeEntry, upsertMessengerChat]);
+
   const handleOpenFolder = useCallback(async () => {
     const picked = await archive.openFolder(
       settings.deletionEnabled || settings.attachmentBookmarkingEnabled,
@@ -346,6 +351,8 @@ export default function App() {
         attachmentBookmarkingEnabled={bookmarkingEnabled}
         bookmarks={bookmarks}
         onRequestOverlayWriteAccess={requestOverlayWriteAccess}
+        onFavoritesFileSaved={handleFavoritesFileSaved}
+        onOpenChat={entry => void handleSelectChat(entry)}
       />
 
       <div

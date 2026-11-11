@@ -148,4 +148,33 @@ test('loads, searches and edits a 49k-message thread without changing its source
   expect(files.names).toEqual(['Thanh Dii_0.cleaned.json', 'Thanh Dii_0.json', 'Thanh Dii_0.overlay.json']);
   expect(files.writes.every(name => name !== SOURCE)).toBe(true);
   expect(files.sourceHash).toBe(files.originalHash);
+  await page.getByRole('complementary', { name: 'Tin nhắn đã xóa' }).getByRole('button', { name: 'Đóng' }).click();
+
+  // Select two messages (click, then Shift+click) and favorite them together.
+  await page.getByRole('button', { name: 'Chọn nhiều tin nhắn' }).click();
+  await page.locator('.message-wrapper').getByText('hôm nay tin nhắn số 3', { exact: true }).click();
+  await page.locator('.message-wrapper').getByText('đường tin nhắn số 2', { exact: true }).click({ modifiers: ['Shift'] });
+  const selectionBar = page.getByRole('toolbar', { name: 'Chọn tin nhắn' });
+  await expect(selectionBar).toContainText('2 đã chọn');
+  await selectionBar.getByRole('button', { name: 'Favorite' }).click();
+  await expect(selectionBar).toHaveCount(0);
+
+  // Save them as a conversation and open it from the list.
+  await page.getByRole('button', { name: 'Favorites', exact: true }).click();
+  const favoritesPanel = page.getByRole('complementary', { name: 'Favorites' });
+  await expect(favoritesPanel).toContainText('Favorites (3)');
+  await favoritesPanel.getByRole('button', { name: 'Lưu file favorites' }).click();
+  await expect(favoritesPanel).toContainText('Đã lưu Thanh Dii_0.favorites.json (2 tin).');
+  const favoritesChat = page.locator('.chat-list-item').filter({ hasText: 'Thanh Dii (Favorites)' });
+  await expect(favoritesChat).toBeVisible();
+  await favoritesPanel.getByRole('button', { name: 'Mở chat Favorites' }).click();
+  await expect(page.getByRole('heading', { name: 'Thanh Dii (Favorites)' })).toBeVisible();
+  await expect(page.locator('#chat:not([data-opening])')).toBeVisible();
+  await expect(page.locator('.message[data-msg-index]')).toHaveCount(2);
+  await expect(page.locator('.message-wrapper').getByText('hôm nay tin nhắn số 3', { exact: true })).toBeVisible();
+  await expect(page.locator('.message-wrapper').getByText('đường tin nhắn số 2', { exact: true })).toBeVisible();
+
+  files = await readFiles(page);
+  expect(files.names).toContain('Thanh Dii_0.favorites.json');
+  expect(files.sourceHash).toBe(files.originalHash);
 });

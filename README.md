@@ -125,10 +125,12 @@ ZIP downloads support at most 65,535 files and 4 GiB. In Chromium browsers, use 
 
 - Hide messages (soft delete) one at a time or with checkboxes; Shift+click selects a range. **Undo** appears after each deletion, and the **Đã xóa** panel restores messages.
 - Favorite messages with ☆ on hover, add an optional note, and open the **Favorites** panel to jump to them.
+- In selection mode, **Favorite** / **Bỏ favorite** applies to every selected message.
+- **Lưu file favorites** (Favorites panel) writes `<thread>.favorites.json` beside the source: a conversation in the same format holding only the favorite messages, with the original media paths and reactions. It appears in the chat list as "<name> (Favorites)" right away and opens like the original chat. Notes are kept in its `favoriteNotes` field. Hidden (soft-deleted) favorites are left out. Saving again replaces the file with the current favorites.
 - **Export bản sạch** writes `<thread>.cleaned.json` without the hidden messages. The original file is unchanged.
 - The participant chosen as "me" (View perspective) is remembered per conversation.
 
-Edits are stored in `<thread>.overlay.json` beside the conversation file. The app never writes the conversation JSON or the `media/` folder; it can only create files ending in `.overlay.json` or `.cleaned.json`, and it skips those files when listing chats. Without write access (read-only folder, Firefox, Safari), edits are kept in the browser's IndexedDB, and **Export overlay** downloads them. **Cho phép ghi file** in either panel requests write access and moves the edits into the overlay file. Message identity is a hash of timestamp, sender, and position in the file, so an overlay applies only to the same export file.
+Edits are stored in `<thread>.overlay.json` beside the conversation file. The app never writes the conversation JSON or the `media/` folder; it can only create files ending in `.overlay.json`, `.cleaned.json` or `.favorites.json`. Overlay and cleaned files are skipped when listing chats; favorites files are listed as chats. Without write access (read-only folder, Firefox, Safari), edits are kept in the browser's IndexedDB, and **Export overlay** downloads them. **Cho phép ghi file** in either panel requests write access and moves the edits into the overlay file. Message identity is a hash of timestamp, sender, and position in the file, so an overlay applies only to the same export file.
 
 Overlay file format:
 

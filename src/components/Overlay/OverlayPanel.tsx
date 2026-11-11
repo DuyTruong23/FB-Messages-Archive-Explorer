@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download, FileDown, RotateCcw, Star, Trash2, X } from 'lucide-react';
-import type { MessengerMessage, MessengerThread } from '../../types/messenger';
+import { Download, FileDown, MessageSquare, RotateCcw, Save, Star, Trash2, X } from 'lucide-react';
+import type { ChatListEntry, MessengerMessage, MessengerThread } from '../../types/messenger';
 import type { OverlayFavorite } from '../../types/overlay';
 import type { OverlayController } from '../../hooks/useOverlay';
 import { getMessageTimestamp } from '../../services/parser';
@@ -18,6 +18,8 @@ interface OverlayPanelProps {
   onClose: () => void;
   onJumpToMessage: (index: number) => void;
   onRequestWriteAccess?: () => Promise<boolean>;
+  onFavoritesFileSaved?: (fileName: string) => Promise<ChatListEntry | null>;
+  onOpenChat?: (entry: ChatListEntry) => void;
 }
 
 function MessageMeta({ msg }: { msg: MessengerMessage }) {
@@ -78,11 +80,12 @@ function PersistenceStatus({ overlay, onRequestWriteAccess }: Pick<OverlayPanelP
   );
 }
 
-export function OverlayPanel({ mode, chatData, overlay, onClose, onJumpToMessage, onRequestWriteAccess }: OverlayPanelProps) {
+export function OverlayPanel({ mode, chatData, overlay, onClose, onJumpToMessage, onRequestWriteAccess, onFavoritesFileSaved, onOpenChat }: OverlayPanelProps) {
   const [limit, setLimit] = useState(PAGE_SIZE);
+  const [savedChat, setSavedChat] = useState<ChatListEntry | null>(null);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  useEffect(() => { setLimit(PAGE_SIZE); setExportStatus(null); }, [mode, chatData]);
+  useEffect(() => { setLimit(PAGE_SIZE); setExportStatus(null); setSavedChat(null); }, [mode, chatData]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
@@ -115,6 +118,27 @@ export function OverlayPanel({ mode, chatData, overlay, onClose, onJumpToMessage
     }
   };
 
+  const saveFavorites = async () => {
+    setExporting(true);
+    setExportStatus(null);
+    setSavedChat(null);
+    try {
+      const result = await overlay.exportFavorites();
+      if (result.mode === 'file') {
+        const entry = await onFavoritesFileSaved?.(result.fileName).catch(() => null) ?? null;
+        setSavedChat(entry);
+        setExportStatus(`Đã lưu ${result.fileName} (${result.count} tin).${entry ? ' Chat Favorites đã có trong danh sách chat.' : ''}`);
+      } else {
+        setExportStatus(`Đã tải ${result.fileName} (${result.count} tin). Đặt file cạnh file gốc rồi mở lại thư mục để xem như một chat.`);
+      }
+    } catch (error) {
+      console.error('Failed to save favorites:', error);
+      setExportStatus('Không lưu được file favorites.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <aside className="overlay-panel" aria-label={mode === 'favorites' ? 'Favorites' : 'Tin nhắn đã xóa'}>
       <div className="overlay-panel-header">
@@ -142,11 +166,28 @@ export function OverlayPanel({ mode, chatData, overlay, onClose, onJumpToMessage
           {exportStatus && <span className="overlay-item-meta" role="status">{exportStatus}</span>}
         </div>
       )}
-      {mode === 'favorites' && overlay.persistence !== 'file' && (
+      {mode === 'favorites' && (
         <div className="overlay-panel-toolbar">
-          <button type="button" className="overlay-small-btn" onClick={overlay.exportOverlay}>
-            <Download size={14} aria-hidden="true" />Export overlay
+          <button
+            type="button"
+            className="overlay-small-btn"
+            disabled={exporting || indices.every(index => overlay.deletedMask[index])}
+            title="Lưu các tin favorite thành một chat riêng (file .favorites.json cạnh file gốc)"
+            onClick={() => void saveFavorites()}
+          >
+            <Save size={14} aria-hidden="true" />Lưu file favorites
           </button>
+          {savedChat && onOpenChat && (
+            <button type="button" className="overlay-small-btn" onClick={() => onOpenChat(savedChat)}>
+              <MessageSquare size={14} aria-hidden="true" />Mở chat Favorites
+            </button>
+          )}
+          {overlay.persistence !== 'file' && (
+            <button type="button" className="overlay-small-btn" onClick={overlay.exportOverlay}>
+              <Download size={14} aria-hidden="true" />Export overlay
+            </button>
+          )}
+          {exportStatus && <span className="overlay-item-meta" role="status">{exportStatus}</span>}
         </div>
       )}
       <div className="overlay-panel-list">

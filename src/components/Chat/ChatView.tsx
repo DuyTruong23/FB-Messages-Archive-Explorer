@@ -55,6 +55,9 @@ interface ChatViewProps {
   onAttachmentJumpHandled?: () => void;
   /** Ask for write access so overlay edits can be saved beside the conversation. */
   onRequestOverlayWriteAccess?: () => Promise<boolean>;
+  /** A favorites file was written beside the source; add it to the chat list. */
+  onFavoritesFileSaved?: (fileName: string) => Promise<ChatListEntry | null>;
+  onOpenChat?: (entry: ChatListEntry) => void;
 }
 
 export interface ChatViewHandle {
@@ -118,6 +121,8 @@ export const ChatView = forwardRef<ChatViewHandle, ChatViewProps>(function ChatV
     attachmentJumpTarget,
     onAttachmentJumpHandled,
     onRequestOverlayWriteAccess,
+    onFavoritesFileSaved,
+    onOpenChat,
   },
   ref
 ) {
@@ -441,6 +446,24 @@ export const ChatView = forwardRef<ChatViewHandle, ChatViewProps>(function ChatV
               </span>
               <div className="actions">
                 <button type="button" className="overlay-small-btn" onClick={messageSelection.stop}>Hủy</button>
+                {(() => {
+                  const allFavorite = messageSelection.selected.size > 0
+                    && [...messageSelection.selected].every(index => overlay.favoriteIndices.has(index));
+                  return (
+                    <button
+                      type="button"
+                      className="overlay-small-btn"
+                      aria-pressed={allFavorite}
+                      disabled={messageSelection.selected.size === 0}
+                      onClick={() => {
+                        overlay.setFavorites([...messageSelection.selected], !allFavorite);
+                        messageSelection.stop();
+                      }}
+                    >
+                      <Star size={14} aria-hidden="true" />{allFavorite ? 'Bỏ favorite' : 'Favorite'}
+                    </button>
+                  );
+                })()}
                 <button
                   type="button"
                   className="overlay-small-btn danger"
@@ -463,6 +486,8 @@ export const ChatView = forwardRef<ChatViewHandle, ChatViewProps>(function ChatV
               overlay={overlay}
               onClose={closeOverlayPanel}
               onRequestWriteAccess={onRequestOverlayWriteAccess}
+              onFavoritesFileSaved={onFavoritesFileSaved}
+              onOpenChat={onOpenChat}
               onJumpToMessage={index => {
                 if (mobile) setOverlayPanel(null);
                 void handleJumpToMessage(index);

@@ -4,9 +4,10 @@ import type { ReadableDirectoryHandle, WritableDirectoryHandle } from '../types/
 import type { Overlay, OverlayFavorite, OverlayPersistence } from '../types/overlay';
 import { getMessageIds } from '../services/messageId';
 import {
-  buildCleanedJson, createEmptyOverlay, getCleanedFileName, getDeletedMask, getFavoritesByIndex,
-  getOverlayFileName, hasWritePermission, readOverlayFile, serializeOverlay, setFavoriteNote,
-  setMessagesDeleted, setOverlayMe, toggleFavorite, writeCleanedFile, writeOverlayFile,
+  buildCleanedJson, buildFavoritesJson, createEmptyOverlay, getCleanedFileName, getDeletedMask,
+  getFavoritesByIndex, getFavoritesFileName, getOverlayFileName, hasWritePermission, readOverlayFile,
+  serializeOverlay, setFavoriteNote, setMessagesDeleted, setMessagesFavorite, setOverlayMe,
+  toggleFavorite, writeCleanedFile, writeFavoritesFile, writeOverlayFile,
 } from '../services/overlay';
 import { getOverlayStoreKey, isOverlayStoreAvailable, loadStoredOverlay, saveStoredOverlay } from '../services/overlayStore';
 
@@ -25,6 +26,12 @@ interface OverlayTarget {
 export interface OverlayUndo {
   ids: string[];
   count: number;
+}
+
+export interface FavoritesExportResult {
+  fileName: string;
+  count: number;
+  mode: 'file' | 'download';
 }
 
 export interface CleanedExportResult {
@@ -54,6 +61,10 @@ export interface OverlayController {
   undoDelete: () => void;
   dismissUndo: () => void;
   toggleFavorite: (index: number) => void;
+  /** Favorite or unfavorite several messages, e.g. the current selection. */
+  setFavorites: (indices: readonly number[], favorite: boolean) => void;
+  /** Write `<thread>.favorites.json`: a conversation of the favorite messages, openable like the source. */
+  exportFavorites: () => Promise<FavoritesExportResult>;
   setFavoriteNote: (id: string, note: string) => void;
   setMe: (name: string) => void;
   exportCleaned: () => Promise<CleanedExportResult>;
@@ -69,7 +80,8 @@ const DISABLED: OverlayController = {
   messageIds: EMPTY_IDS, deletedMask: EMPTY_MASK, deletedCount: 0,
   favoritesByIndex: EMPTY_FAVORITES, favoriteIndices: new Set<number>(), undo: null,
   deleteMessages: noop, restoreMessages: noop, undoDelete: noop, dismissUndo: noop,
-  toggleFavorite: noop, setFavoriteNote: noop, setMe: noop,
+  toggleFavorite: noop, setFavorites: noop, setFavoriteNote: noop, setMe: noop,
+  exportFavorites: () => Promise.reject(new Error('No conversation is open.')),
   exportCleaned: () => Promise.reject(new Error('No conversation is open.')),
   exportOverlay: noop, refreshPersistence: () => Promise.resolve(), clearError: noop,
 };
@@ -291,6 +303,38 @@ export function useOverlay(entry: ChatListEntry | null, chatData: MessengerThrea
     return { fileName, removed: removedSourceIndices.size, mode: 'download' };
   }, [deletedMask]);
 
+  const setFavorites = useCallback((indices: readonly number[], favorite: boolean) => {
+    const ids = indices.map(index => messageIds[index]).filter((id): id is string => !!id);
+    if (ids.length > 0) update(current => setMessagesFavorite(current, ids, favorite));
+  }, [messageIds, update]);
+
+  const exportFavorites = useCallback(async (): Promise<FavoritesExportResult> => {
+    const exportTarget = targetRef.current;
+    if (!exportTarget) throw new Error('No conversation is open.');
+    // Hidden messages stay out, matching what the chat shows.
+    const bySourceIndex = new Map<number, OverlayFavorite>();
+    favoritesByIndex.forEach((favorite, index) => {
+      if (deletedMask[index]) return;
+      const message = exportTarget.thread.messages[index];
+      if (message) bySourceIndex.set(message._sourceIndex ?? index, favorite);
+    });
+    const sourceHandle = await exportTarget.directory.getFileHandle(exportTarget.sourceFile);
+    const { content, count } = buildFavoritesJson(await (await sourceHandle.getFile()).text(), bySourceIndex);
+    const fileName = getFavoritesFileName(exportTarget.sourceFile);
+    if (await hasWritePermission(exportTarget.directory)) {
+      const directory = exportTarget.directory as WritableDirectoryHandle;
+      await writeFavoritesFile(directory, exportTarget.sourceFile, content);
+      // Open the favorites chat from the same side ("me") as the source.
+      const me = overlayRef.current?.settings?.me;
+      if (me && !await readOverlayFile(directory, fileName).catch(() => null)) {
+        await writeOverlayFile(directory, setOverlayMe(createEmptyOverlay(fileName), me)).catch(() => {});
+      }
+      return { fileName, count, mode: 'file' };
+    }
+    downloadText(fileName, content);
+    return { fileName, count, mode: 'download' };
+  }, [favoritesByIndex, deletedMask]);
+
   const exportOverlay = useCallback(() => {
     if (overlayRef.current) downloadText(getOverlayFileName(overlayRef.current.sourceFile), serializeOverlay(overlayRef.current));
   }, []);
@@ -310,11 +354,12 @@ export function useOverlay(entry: ChatListEntry | null, chatData: MessengerThrea
     available: true, loaded, overlay, persistence, saving, error,
     messageIds, deletedMask, deletedCount, favoritesByIndex, favoriteIndices, undo,
     deleteMessages, restoreMessages, undoDelete, dismissUndo,
-    toggleFavorite: toggleFavoriteAt, setFavoriteNote: setNote, setMe,
-    exportCleaned, exportOverlay, refreshPersistence, clearError,
+    toggleFavorite: toggleFavoriteAt, setFavorites, setFavoriteNote: setNote, setMe,
+    exportFavorites, exportCleaned, exportOverlay, refreshPersistence, clearError,
   } : DISABLED, [
     target, loaded, overlay, persistence, saving, error, messageIds, deletedMask, deletedCount,
     favoritesByIndex, favoriteIndices, undo, deleteMessages, restoreMessages, undoDelete, dismissUndo,
-    toggleFavoriteAt, setNote, setMe, exportCleaned, exportOverlay, refreshPersistence, clearError,
+    toggleFavoriteAt, setFavorites, setNote, setMe, exportFavorites, exportCleaned, exportOverlay,
+    refreshPersistence, clearError,
   ]);
 }
