@@ -1,13 +1,22 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SearchBar } from '../src/components/Sidebar/SearchBar';
 import type { useSearch } from '../src/hooks/useSearch';
 import { DEFAULT_SEARCH_FILTER } from '../src/services/searchFilters';
 
+// jsdom does not implement scrollIntoView; SearchBar calls it when stepping results.
+const scrollIntoView = vi.fn();
+
+beforeEach(() => {
+  scrollIntoView.mockClear();
+  Element.prototype.scrollIntoView = scrollIntoView;
+});
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  delete (Element.prototype as Partial<Element>).scrollIntoView;
 });
 
 describe('SearchBar', () => {
@@ -83,6 +92,8 @@ describe('SearchBar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Kết quả sau' }));
     fireEvent.click(screen.getByRole('button', { name: 'Kết quả trước' }));
     expect(onJumpToMessage.mock.calls.map(call => call[0])).toEqual([10, 20, 10]);
+    expect(scrollIntoView).toHaveBeenCalledTimes(3);
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest' });
     expect(screen.getByRole('status').textContent).toContain('1 / 3 kết quả');
   });
 });
