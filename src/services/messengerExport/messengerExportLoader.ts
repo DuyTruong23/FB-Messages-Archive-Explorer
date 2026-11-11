@@ -6,6 +6,7 @@ import { mapWithConcurrency } from '../concurrency';
 import { performanceLimit } from '../performanceSettings';
 import { getMessageTimestamp } from '../parser';
 import { getMessageBump } from '../messageBump';
+import { isOverlayArtifactFileName } from '../overlay';
 import {
   classifyMessengerExportJson,
   getMessengerExportLastMessage,
@@ -97,7 +98,8 @@ export async function listMessengerExportChatsIndexed(
 
     for await (const [name, entry] of diagnostics ? diagnostics.entries(handle) : handle.entries()) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-      if (entry.kind === 'file' && /\.json$/i.test(name)) {
+      // Overlay and cleaned files are this app's own output, not conversations.
+      if (entry.kind === 'file' && /\.json$/i.test(name) && !isOverlayArtifactFileName(name)) {
         fileHandles.push({ name, handle: entry });
       }
     }
