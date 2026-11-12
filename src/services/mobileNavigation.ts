@@ -189,6 +189,18 @@ export class MobileNavigationController {
     if (this.currentEntry !== null) this.entries.set(this.currentEntry, this.state);
   }
   parent() { this.navigate(getParentLocation(this.state.location)); }
+  /** Android system Back: one level up, not browser history. Returns false at the root chat list. */
+  back(): boolean {
+    const { location, returnTo } = this.state;
+    if (location.preview) { this.closePreview(); return true; }
+    if (returnTo) { this.returnFromJump(); return true; }
+    if (location.screen !== 'home') { this.parent(); return true; }
+    if (location.sidebarView !== 'chats' || location.chatListView !== 'chats') {
+      this.navigate({ ...location, sidebarView: 'chats', chatListView: 'chats' });
+      return true;
+    }
+    return false;
+  }
   returnFromJump() {
     const target = this.state.returnTo;
     if (!target) return;

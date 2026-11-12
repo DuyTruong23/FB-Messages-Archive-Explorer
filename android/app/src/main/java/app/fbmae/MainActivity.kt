@@ -125,8 +125,13 @@ class MainActivity : Activity(), ActivityPort {
         }
     }
 
+    // The web app records every panel and tab change in history, so WebView.goBack() would walk
+    // all of them. Ask the app to go one level up instead; it returns false at the chat list.
     private fun handleBack() {
-        if (webView.canGoBack()) webView.goBack() else finish()
+        if (!::webView.isInitialized) return finish()
+        webView.evaluateJavascript("window.fbmaeBack ? window.fbmaeBack() : false") { result ->
+            if (result != "true") finish()
+        }
     }
 
     @Deprecated("Used below API 33 only")

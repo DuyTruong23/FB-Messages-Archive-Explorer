@@ -30,6 +30,7 @@ import { ENABLE_CONTEXTUAL_BACK_NAVIGATION } from './config/uiFeatures';
 import { TrustModal } from './components/Modals/TrustModal';
 import { ReloadPrompt } from './components/ReloadPrompt';
 import { isAndroidApp } from './config/platform';
+import { exposeAndroidBack } from './platform/android/backNavigation';
 import { DeleteConfirmModal } from './components/Modals/DeleteConfirmModal';
 import type { ChatListEntry, SelectableItem } from './types/messenger';
 import { isFileSystemAccessSupported } from './services/fileSystem';
@@ -41,6 +42,7 @@ export default function App() {
   const isMobile = useMobileLayout();
   const { controller: navigation, state: navigationState } = useMobileNavigation(isMobile);
   const location = navigationState.location;
+  useEffect(() => (isAndroidApp() ? exposeAndroidBack(window, navigation) : undefined), [navigation]);
   const archive = useArchive(settings.deletionEnabled, settings.debuggingEnabled);
   const chat = useChat();
   const overlay = useOverlay(chat.activeEntry, chat.chatData);
