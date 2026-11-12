@@ -1,9 +1,12 @@
+import { useEscapeToCancel } from './useEscapeToCancel';
+
 interface EnableDeletionModalProps {
   onConfirm: () => void;
   onCancel: () => void;
 }
 
 export function EnableDeletionModal({ onConfirm, onCancel }: EnableDeletionModalProps) {
+  useEscapeToCancel(onCancel);
   return (
     <div className="delete-modal" role="dialog" aria-modal="true" aria-labelledby="enableDelTitle">
       <div className="delete-backdrop" onClick={onCancel} />

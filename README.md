@@ -374,6 +374,8 @@ Without `android/keystore.properties`, the release APK is signed with the debug 
 
 On Android 11 and later, the folder picker cannot select the root of internal storage or the root of `Download`. Extract the export into its own folder, for example `Download/facebook-export`, and select that folder.
 
+The system Back button first closes an open viewer, dialog, menu or panel, then goes up one screen (attachment list → chat info → chat → chat list), and closes the app from the chat list. Rotating the device keeps the open chat and its scroll position.
+
 Measured on a Galaxy S23 (2026-11-11/12, fake test archive): release APK size 0.34 MB, cold start 216–262 ms (`am start -W`, 3 runs), memory while playing and seeking a 300 MB video about 420 MB total PSS (app process about 260 MB plus WebView renderer about 160 MB).
 
 <a name="64-other-developer-commands"></a>

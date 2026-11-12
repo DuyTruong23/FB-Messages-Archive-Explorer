@@ -6,6 +6,7 @@ import { getMetaChatId } from '../../services/metaAttachmentPaths';
 import { MetaChatDeletionBlockedError } from '../../services/metaChatDeletion';
 import { CalculationProgressBar } from '../CalculationProgressBar';
 import type { CalculationProgressStore } from '../../services/calculationProgress';
+import { useEscapeToCancel } from './useEscapeToCancel';
 
 interface DeleteConfirmModalProps {
   entry: ChatListEntry | ChatListEntry[];
@@ -96,6 +97,7 @@ export function DeleteConfirmModal({
   const isMessenger = entries.some(item => item._messengerExport);
   const isDeleting = !!deleting || !!progress;
   const isBusy = !!preparingDeletion || isDeleting;
+  useEscapeToCancel(onCancel, isBusy);
   const info = 'info' in preparation ? preparation.info : undefined;
   const unchecked = preparation.status === 'unchecked' || !!preparation.attachmentCheckSkipped;
   const sizesSkipped = preparation.status === 'unchecked' || preparation.status === 'skipped' || (preparation.status === 'loading' && preparation.sizesSkipped);

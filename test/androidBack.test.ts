@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { HOME_LOCATION, MobileNavigationController, type NavigationLocation } from '../src/services/mobileNavigation';
-import { exposeAndroidBack } from '../src/platform/android/backNavigation';
+import { dismissTopLayer, exposeAndroidBack } from '../src/platform/android/backNavigation';
 import type { SelectableItem } from '../src/types/messenger';
 
 function controller() {
@@ -67,12 +67,39 @@ describe('Android Back', () => {
   });
 
   it('exposes the handler to the native shell and removes it on cleanup', () => {
-    const win = {} as Window;
+    document.body.innerHTML = '';
+    const win = { document } as Window;
     const back = vi.fn(() => true);
     const cleanup = exposeAndroidBack(win, { back });
     expect(win.fbmaeBack?.()).toBe(true);
     expect(back).toHaveBeenCalledOnce();
     cleanup();
     expect(win.fbmaeBack).toBeUndefined();
+  });
+
+  it.each([
+    '<div class="delete-modal" role="dialog" aria-modal="true"></div>',
+    '<div class="media-viewer-overlay"></div>',
+    '<aside class="overlay-panel"></aside>',
+    '<div class="chat-item-dropdown"></div>',
+    '<div class="message-selection-bar" role="toolbar"></div>',
+  ])('sends Escape to close %s instead of navigating', markup => {
+    document.body.innerHTML = markup;
+    const escape = vi.fn();
+    document.addEventListener('keydown', escape);
+    const back = vi.fn(() => true);
+    const win = { document } as Window;
+    const cleanup = exposeAndroidBack(win, { back });
+    expect(win.fbmaeBack?.()).toBe(true);
+    expect(escape).toHaveBeenCalledOnce();
+    expect(escape.mock.calls[0][0]).toMatchObject({ key: 'Escape' });
+    expect(back).not.toHaveBeenCalled();
+    document.removeEventListener('keydown', escape);
+    cleanup();
+  });
+
+  it('leaves navigation to the controller when no layer is open', () => {
+    document.body.innerHTML = '<main></main>';
+    expect(dismissTopLayer(document)).toBe(false);
   });
 });
