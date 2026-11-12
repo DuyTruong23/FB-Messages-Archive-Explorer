@@ -374,7 +374,7 @@ Without `android/keystore.properties`, the release APK is signed with the debug 
 
 On Android 11 and later, the folder picker cannot select the root of internal storage or the root of `Download`. Extract the export into its own folder, for example `Download/facebook-export`, and select that folder.
 
-Measured on a Galaxy S23: release APK size …, cold start …, memory while playing a 300 MB video ….
+Measured on a Galaxy S23 (2026-11-11/12, fake test archive): release APK size 0.34 MB, cold start 216–262 ms (`am start -W`, 3 runs), memory while playing and seeking a 300 MB video about 420 MB total PSS (app process about 260 MB plus WebView renderer about 160 MB).
 
 <a name="64-other-developer-commands"></a>
 
