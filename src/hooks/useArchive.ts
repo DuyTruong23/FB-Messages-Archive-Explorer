@@ -45,6 +45,13 @@ import { getFolderUploadInfo } from '../services/polyfill';
 import { compareChatsByRecency, loadMessengerExportEntry } from '../services/messengerExport';
 import { FolderOpenDiagnostics, runFolderOperation } from '../services/folderOpenDiagnostics';
 
+export interface OpenFolderSource {
+  /** Supplies the folder instead of showing the picker; reject with AbortError to stop quietly. */
+  pick?: () => Promise<ReadableDirectoryHandle>;
+  /** Called with the selected folder once its conversations are listed. */
+  onOpened?: (handle: ReadableDirectoryHandle) => void;
+}
+
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw new DOMException('Aborted', 'AbortError');
@@ -167,7 +174,7 @@ export function useArchive(deletionEnabled: boolean, debuggingEnabled = false): 
   loadProgress: { done: number; total: number } | null;
   sizeProgress: { done: number; total: number } | null;
   error: string | null;
-  openFolder: (requestWrite?: boolean, onFolderPicked?: () => void, accessMode?: FolderAccessMode) => Promise<boolean>;
+  openFolder: (requestWrite?: boolean, onFolderPicked?: () => void, accessMode?: FolderAccessMode, source?: OpenFolderSource) => Promise<boolean>;
   openFolderWithWriteAccess: () => Promise<void>;
   getDeleteInfo: (
     entry: ChatListEntry | ChatListEntry[],
@@ -322,7 +329,12 @@ export function useArchive(deletionEnabled: boolean, debuggingEnabled = false): 
     commitOne: commitSize,
   });
 
-  const openFolder = useCallback(async (requestWrite?: boolean, onFolderPicked?: () => void, accessMode: FolderAccessMode = 'native'): Promise<boolean> => {
+  const openFolder = useCallback(async (
+    requestWrite?: boolean,
+    onFolderPicked?: () => void,
+    accessMode: FolderAccessMode = 'native',
+    source: OpenFolderSource = {},
+  ): Promise<boolean> => {
     let abortCtrl: AbortController | null = null;
     let browserFolderDetails = '';
     const pickerRequest = ++folderPickerRequestRef.current;
@@ -337,9 +349,11 @@ export function useArchive(deletionEnabled: boolean, debuggingEnabled = false): 
     const nativeSelected = accessMode === 'native' && isFileSystemAccessSupported();
     const diagnostics = nativeSelected ? new FolderOpenDiagnostics(requestWrite ? 'readwrite' : 'read') : undefined;
     try {
-      const handle = await runFolderOperation(diagnostics, 'showDirectoryPicker()', () => requestWrite
-        ? pickFolderWithWriteAccess(accessMode, onPreparationProgress)
-        : pickMessagesFolder(accessMode, onPreparationProgress));
+      const handle = await runFolderOperation(diagnostics, 'showDirectoryPicker()', () => source.pick
+        ? source.pick()
+        : requestWrite
+          ? pickFolderWithWriteAccess(accessMode, onPreparationProgress)
+          : pickMessagesFolder(accessMode, onPreparationProgress));
       if (pickerRequest !== folderPickerRequestRef.current) return false;
       if (diagnostics) diagnostics.pickerReturned = true;
       setFolderSelectionPending(false);
@@ -423,6 +437,7 @@ export function useArchive(deletionEnabled: boolean, debuggingEnabled = false): 
         setRequestsList([]);
         setSizeWorkPlan({ kind: 'messenger', scope: { rootHandle: messengerRoot, generation, signal: abortCtrl.signal }, sizeMetadata });
         startBackgroundSizeWork();
+        source.onOpened?.(handle);
         return true;
       }
 
@@ -483,6 +498,7 @@ export function useArchive(deletionEnabled: boolean, debuggingEnabled = false): 
       setRequestsList(requests);
       setSizeWorkPlan({ kind: 'facebook', scope: { rootHandle: messagesRoot, generation, signal: abortCtrl.signal } });
       startBackgroundSizeWork();
+      source.onOpened?.(handle);
       return true;
     } catch (e: unknown) {
       if (pickerRequest !== folderPickerRequestRef.current) return false;

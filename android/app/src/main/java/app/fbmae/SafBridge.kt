@@ -57,6 +57,12 @@ class SafBridge(
             when (request.optString("method")) {
                 "hello" -> respond(reply, id, JSONObject().put("binary", binarySupported))
                 "pickDirectory" -> pickDirectory(reply, id)
+                "restoreDirectory" -> respond(reply, id, restoreDirectory())
+                "rememberDirectory" -> {
+                    val tree = tree(args)
+                    prefs.edit().putString(KEY_OPEN_TREE, tree.toString()).apply()
+                    respond(reply, id, JSONObject())
+                }
                 "listChildren" -> {
                     val tree = tree(args)
                     respond(reply, id, JSONObject().put("entries", store.listChildren(tree, document(args, "uri"))))
@@ -126,6 +132,19 @@ class SafBridge(
         }
     }
 
+    /**
+     * The last folder the app opened, or an empty object. A revoked grant forgets the folder;
+     * an unreadable one (for example on an unmounted SD card) is kept for the next launch.
+     */
+    private fun restoreDirectory(): JSONObject {
+        val saved = prefs.getString(KEY_OPEN_TREE, null) ?: return JSONObject()
+        if (!TreeGuard.isTreeGranted(saved, store.refreshTrees())) {
+            prefs.edit().remove(KEY_OPEN_TREE).apply()
+            return JSONObject()
+        }
+        return runCatching { store.treeRoot(Uri.parse(saved)) }.getOrNull() ?: JSONObject()
+    }
+
     private fun beginOutput(args: JSONObject, reply: JavaScriptReplyProxy, id: Int) {
         val name = OutputNames.sanitize(args.getString("name"))
         val mimeType = args.optString("mimeType", "application/octet-stream")
@@ -177,5 +196,6 @@ class SafBridge(
 
     companion object {
         private const val KEY_LAST_TREE = "lastTree"
+        private const val KEY_OPEN_TREE = "openTree"
     }
 }

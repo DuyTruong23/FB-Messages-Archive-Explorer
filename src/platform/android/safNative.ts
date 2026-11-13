@@ -7,6 +7,9 @@ export interface PickedTree extends SafEntry {
 
 export interface AndroidNative extends SafNative {
   pickDirectory(mode: 'read' | 'readwrite'): Promise<PickedTree>;
+  /** The folder saved with rememberDirectory, or null when there is none or it is no longer granted. */
+  restoreDirectory(): Promise<PickedTree | null>;
+  rememberDirectory(treeUri: string): Promise<void>;
   /** Opens a writer for a save-as document (system picker) or an external-view cache file. */
   beginOutput(kind: 'saveAs' | 'open', name: string, mimeType: string): Promise<number>;
 }
@@ -21,6 +24,13 @@ export function encodeSafPath(uri: string): string {
 export function createAndroidNative(bridge: NativeBridge, fetchImpl: typeof fetch = (...args) => fetch(...args)): AndroidNative {
   return {
     pickDirectory: mode => bridge.call<PickedTree>('pickDirectory', { mode }, null),
+    restoreDirectory: async () => {
+      const saved = await bridge.call<Partial<PickedTree> | null>('restoreDirectory');
+      return saved?.treeUri ? saved as PickedTree : null;
+    },
+    rememberDirectory: async treeUri => {
+      await bridge.call('rememberDirectory', { treeUri });
+    },
     listChildren: async (treeUri, uri) => (await bridge.call<{ entries: SafEntry[] }>('listChildren', { treeUri, uri })).entries,
     createDocument: (treeUri, parentUri, name, directory) => bridge.call<SafEntry>('createDocument', { treeUri, parentUri, name, directory }),
     deleteDocument: async (treeUri, uri) => {
