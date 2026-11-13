@@ -78,6 +78,25 @@ describe('Android saved folder', () => {
   });
 });
 
+describe('Android saved location', () => {
+  it('reads and writes the navigation string through the bridge', async () => {
+    const { native, calls } = fakeBridge(method => method === 'readNavigation' ? { value: '{"version":1}' } : {});
+    const saved = createSavedFolder(native);
+    await expect(saved.loadLocation()).resolves.toBe('{"version":1}');
+    await saved.saveLocation('{"version":1,"x":2}');
+    expect(calls).toEqual([
+      { method: 'readNavigation', args: {} },
+      { method: 'writeNavigation', args: { value: '{"version":1,"x":2}' } },
+    ]);
+  });
+
+  it('treats a missing value or a failed read as nothing saved', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(createSavedFolder(fakeBridge(() => ({ value: null })).native).loadLocation()).resolves.toBeNull();
+    await expect(createSavedFolder(fakeBridge(() => { throw new Error('gone'); }).native).loadLocation()).resolves.toBeNull();
+  });
+});
+
 describe('useArchive folder source', () => {
   it('opens the supplied folder without the picker and reports it once listed', async () => {
     const picker = vi.fn();

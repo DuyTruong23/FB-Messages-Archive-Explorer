@@ -260,13 +260,20 @@ export class MobileNavigationController {
     this.publish({ location: base.location, snapshot: base.snapshot, revision: source.revision + 1, restoring: true });
     if (this.currentEntry !== null) this.entries.set(this.currentEntry, this.state);
   }
+  /** Opens a saved location with a fresh history, loading its chat and applying its snapshot. */
+  restore(location: NavigationLocation, snapshot: NavigationSnapshot) {
+    this.startOver({ location, snapshot, revision: this.state.revision + 1, restoring: true });
+  }
   reset(location: NavigationLocation = { ...HOME_LOCATION }) {
+    this.startOver({ location, revision: this.state.revision + 1, restoring: false });
+  }
+  private startOver(state: NavigationState) {
     this.previewClosePending = false;
     this.session = createSessionId();
     this.entries.clear();
     this.trail = [];
     this.currentEntry = null;
-    this.publish({ location, revision: this.state.revision + 1, restoring: false });
+    this.publish(state);
     if (this.mobile) this.writeEntry(false);
   }
   private onPopState = () => {

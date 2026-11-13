@@ -145,6 +145,8 @@ class MainActivity : Activity(), ActivityPort {
     }
 
     override fun onPause() {
+        // Save the open screen and scroll position now: the process may be removed from Recents next.
+        if (::webView.isInitialized) webView.evaluateJavascript("window.fbmaeSaveState && window.fbmaeSaveState()", null)
         if (::webView.isInitialized) webView.onPause()
         super.onPause()
     }

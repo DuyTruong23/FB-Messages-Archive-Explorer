@@ -374,7 +374,7 @@ Without `android/keystore.properties`, the release APK is signed with the debug 
 
 On Android 11 and later, the folder picker cannot select the root of internal storage or the root of `Download`. Extract the export into its own folder, for example `Download/facebook-export`, and select that folder.
 
-The app remembers the last folder it opened and reopens it when you start the app again. Selecting another folder replaces it. If you remove the app's access to the folder in system settings, the app shows the folder picker again.
+The app remembers the last folder it opened and reopens it when you start the app again, on the same screen: the open chat (or its info or attachments) and its scroll position. A media preview or selection is not restored. Selecting another folder replaces it. If you remove the app's access to the folder in system settings, the app shows the folder picker again.
 
 The system Back button first closes an open viewer, dialog, menu or panel, then goes up one screen (attachment list → chat info → chat → chat list), and closes the app from the chat list. Rotating the device keeps the open chat and its scroll position.
 

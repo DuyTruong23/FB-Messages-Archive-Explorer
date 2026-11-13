@@ -63,6 +63,13 @@ class SafBridge(
                     prefs.edit().putString(KEY_OPEN_TREE, tree.toString()).apply()
                     respond(reply, id, JSONObject())
                 }
+                "readNavigation" -> respond(reply, id, JSONObject().put("value", prefs.getString(KEY_NAVIGATION, null) ?: JSONObject.NULL))
+                "writeNavigation" -> {
+                    val value = args.getString("value")
+                    require(value.length <= MAX_NAVIGATION_CHARS) { "The navigation state is too large." }
+                    prefs.edit().putString(KEY_NAVIGATION, value).apply()
+                    respond(reply, id, JSONObject())
+                }
                 "listChildren" -> {
                     val tree = tree(args)
                     respond(reply, id, JSONObject().put("entries", store.listChildren(tree, document(args, "uri"))))
@@ -197,5 +204,7 @@ class SafBridge(
     companion object {
         private const val KEY_LAST_TREE = "lastTree"
         private const val KEY_OPEN_TREE = "openTree"
+        private const val KEY_NAVIGATION = "navigation"
+        private const val MAX_NAVIGATION_CHARS = 64 * 1024
     }
 }

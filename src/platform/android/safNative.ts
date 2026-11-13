@@ -10,6 +10,9 @@ export interface AndroidNative extends SafNative {
   /** The folder saved with rememberDirectory, or null when there is none or it is no longer granted. */
   restoreDirectory(): Promise<PickedTree | null>;
   rememberDirectory(treeUri: string): Promise<void>;
+  /** Small app state kept in SharedPreferences, which survives the process being killed right after leaving the app. */
+  readNavigation(): Promise<string | null>;
+  writeNavigation(value: string): Promise<void>;
   /** Opens a writer for a save-as document (system picker) or an external-view cache file. */
   beginOutput(kind: 'saveAs' | 'open', name: string, mimeType: string): Promise<number>;
 }
@@ -30,6 +33,13 @@ export function createAndroidNative(bridge: NativeBridge, fetchImpl: typeof fetc
     },
     rememberDirectory: async treeUri => {
       await bridge.call('rememberDirectory', { treeUri });
+    },
+    readNavigation: async () => {
+      const saved = await bridge.call<{ value?: unknown } | null>('readNavigation');
+      return typeof saved?.value === 'string' ? saved.value : null;
+    },
+    writeNavigation: async value => {
+      await bridge.call('writeNavigation', { value });
     },
     listChildren: async (treeUri, uri) => (await bridge.call<{ entries: SafEntry[] }>('listChildren', { treeUri, uri })).entries,
     createDocument: (treeUri, parentUri, name, directory) => bridge.call<SafEntry>('createDocument', { treeUri, parentUri, name, directory }),
