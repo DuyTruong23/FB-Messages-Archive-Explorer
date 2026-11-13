@@ -1,16 +1,19 @@
 import type { MessengerMessage, SearchIndexEntry, SearchResult } from '../types/messenger';
+import type { SearchFilter } from '../types/overlay';
+import { isSearchFilterActive, matchesSearchFilter } from './searchFilters';
+import { getMessageLinks } from './messageLinks';
 import { escapeHtml } from './storage';
 import { fixEncoding } from './parser';
 import { isReactionNoticeMessage } from './reactions';
 import { getMessageBump } from './messageBump';
 
 
-function buildNormalizedMap(original: string): { normalized: string; mapping: number[] } {
+function buildNormalizedMap(original: string, normalize: boolean): { normalized: string; mapping: number[] } {
   const mapping: number[] = [];
   let normalized = '';
   for (let i = 0; i < original.length; i++) {
     const ch = original[i];
-    const n = ch.normalize('NFD').replace(/\p{Diacritic}/gu, '');
+    const n = normalize ? foldDiacritics(ch) : ch;
     for (let k = 0; k < n.length; k++) {
       mapping.push(i);
       normalized += n[k];
@@ -19,8 +22,8 @@ function buildNormalizedMap(original: string): { normalized: string; mapping: nu
   return { normalized: normalized.toLowerCase(), mapping };
 }
 
-function findRangesForToken(original: string, tokenNorm: string): [number, number][] {
-  const { normalized, mapping } = buildNormalizedMap(original);
+function findRangesForToken(original: string, tokenNorm: string, normalize: boolean): [number, number][] {
+  const { normalized, mapping } = buildNormalizedMap(original, normalize);
   const ranges: [number, number][] = [];
   let start = 0;
   while (true) {
@@ -55,17 +58,30 @@ function getMessageText(msg: MessengerMessage): string {
 }
 
 
-export function normalizeForSearch(str: string): string {
-  if (!str) return '';
-  const normalized = str.normalize('NFD').replace(/\p{Diacritic}/gu, '');
-  return normalized.toLowerCase().replace(/\s+/g, ' ').trim();
+/** Strip combining marks and fold Vietnamese "đ", which NFD does not decompose. */
+function foldDiacritics(str: string): string {
+  return str.normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
 }
 
-export function highlightText(original: string, query: string): string {
+/** Accent-insensitive form: "lỗi", "LỖI" and "lôi" all become "loi". */
+export function normalizeForSearch(str: string): string {
+  if (!str) return '';
+  return foldDiacritics(str).toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+export const normalize = normalizeForSearch;
+
+/** Case- and whitespace-insensitive form that keeps diacritics. */
+export function foldCaseForSearch(str: string): string {
+  if (!str) return '';
+  return str.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+export function highlightText(original: string, query: string, normalize = true): string {
   if (!query || !original) return escapeHtml(original);
-  const qNorm = normalizeForSearch(query);
+  const qNorm = normalize ? normalizeForSearch(query) : foldCaseForSearch(query);
   if (!qNorm) return escapeHtml(original);
-  const allRanges = findRangesForToken(original, qNorm);
+  const allRanges = findRangesForToken(original, qNorm, normalize);
   if (!allRanges.length) return escapeHtml(original);
   const merged = mergeRanges(allRanges);
   let out = '';
@@ -77,6 +93,15 @@ export function highlightText(original: string, query: string): string {
   }
   out += escapeHtml(original.slice(lastIdx));
   return out;
+}
+
+export const FAILED_MEDIA_LABEL = 'Media tải lỗi';
+
+export interface SearchOptions {
+  filter?: SearchFilter;
+  /** 1 where the message index is soft deleted; such messages never match. */
+  deletedMask?: Uint8Array;
+  favoriteIndices?: ReadonlySet<number>;
 }
 
 export function buildSearchIndex(
@@ -120,10 +145,18 @@ export function buildSearchIndex(
       }
     }
 
+    let hasMedia = !!m.sticker || !!m.failedMediaCount;
+    for (const arr of mediaArrays) if (arr?.length) hasMedia = true;
+    // Failed downloads have no file name; index a label so they stay findable.
+    if (m.failedMediaCount) parts.push(FAILED_MEDIA_LABEL);
+
     const text = parts.join(' ');
     idx.push({
       text,
       normalized: normalizeForSearch(text),
+      exact: foldCaseForSearch(text),
+      hasMedia,
+      hasLink: getMessageLinks(m).length > 0,
       sender: m.senderName || m.sender_name || 'Unknown',
       timestamp: m.timestamp_ms || m.timestamp || 0,
       idx: i,
@@ -136,11 +169,16 @@ export async function performSearch(
   query: string,
   index: SearchIndexEntry[],
   onProgress?: (percent: number) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options: SearchOptions = {}
 ): Promise<SearchResult[]> {
   const results: SearchResult[] = [];
-  const normalizedQuery = normalizeForSearch(query);
-  if (!normalizedQuery) return results;
+  const { filter, deletedMask, favoriteIndices } = options;
+  const useNormalized = filter?.normalize !== false;
+  const normalizedQuery = useNormalized ? normalizeForSearch(query) : foldCaseForSearch(query);
+  const filterActive = !!filter && isSearchFilterActive(filter);
+  // Filters alone are a valid search: "every favorite from Alice in March".
+  if (!normalizedQuery && !filterActive) return results;
 
   let lastYieldTime = performance.now();
   const YIELD_INTERVAL_MS = 15;
@@ -153,7 +191,11 @@ export async function performSearch(
     }
 
     const item = index[i];
-    if (item.normalized.includes(normalizedQuery)) {
+    if (
+      !deletedMask?.[item.idx]
+      && (!filterActive || matchesSearchFilter(item, filter!, favoriteIndices))
+      && (!normalizedQuery || (useNormalized ? item.normalized : item.exact ?? foldCaseForSearch(item.text)).includes(normalizedQuery))
+    ) {
       results.push({ item });
     }
 

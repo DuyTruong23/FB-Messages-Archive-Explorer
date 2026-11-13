@@ -42,6 +42,7 @@ import { buildMetaChatDeletionPlan, getMetaFolderDeletionBlock, MetaChatDeletion
 import type { CalculationProgressStore, CalculationProgress } from '../services/calculationProgress';
 import type { MetaArchivePlatform } from '../services/metaAttachmentPaths';
 import { getFolderUploadInfo } from '../services/polyfill';
+import { compareChatsByRecency, loadMessengerExportEntry } from '../services/messengerExport';
 import { FolderOpenDiagnostics, runFolderOperation } from '../services/folderOpenDiagnostics';
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -181,6 +182,11 @@ export function useArchive(deletionEnabled: boolean, debuggingEnabled = false): 
   deleteChats: (entries: ChatListEntry[], onProgress?: (progress: DeleteProgress) => void, options?: DeleteChatsOptions) => Promise<BatchDeleteResult>;
   deleteMessengerChatsJsonOnly: (entries: ChatListEntry[], onProgress?: (progress: DeleteProgress) => void) => Promise<BatchDeleteResult>;
   updateFolderSize: (entry: ChatListEntry, size: number, sizeIncludesMedia?: boolean) => void;
+  /**
+   * Add or refresh one standalone Messenger conversation written by the app
+   * (a favorites file) without reopening the folder.
+   */
+  upsertMessengerChat: (directory: ReadableDirectoryHandle, jsonFileName: string) => Promise<ChatListEntry | null>;
 } {
   const [reactionSourceRevision, setReactionSourceRevision] = useState(0);
   const [reactionMutationPending, setReactionMutationPending] = useState(false);
@@ -498,6 +504,18 @@ export function useArchive(deletionEnabled: boolean, debuggingEnabled = false): 
       }
     }
   }, [beginMessengerListing, clearOwnership, resetSizeWork, setSizeWorkPlan, startBackgroundSizeWork]);
+
+  const upsertMessengerChat = useCallback(async (directory: ReadableDirectoryHandle, jsonFileName: string) => {
+    if (!isMessengerExportRef.current) return null;
+    const generation = archiveGenerationRef.current;
+    const entry = await loadMessengerExportEntry(directory, jsonFileName);
+    if (!entry || archiveGenerationRef.current !== generation) return null;
+    const isSame = (candidate: ChatListEntry) => candidate.dirHandle === directory && candidate._jsonFileName === jsonFileName;
+    const next = [...inboxListRef.current.filter(candidate => !isSame(candidate)), entry].sort(compareChatsByRecency);
+    inboxListRef.current = next;
+    setInboxList(next);
+    return entry;
+  }, []);
 
   const openFolderWithWriteAccess = useCallback(async () => {
     setError(null);
@@ -857,5 +875,6 @@ export function useArchive(deletionEnabled: boolean, debuggingEnabled = false): 
     loading, folderSelectionPending, folderPreparationProgress, loadProgress, sizeProgress,
     error: error && debuggingEnabled && errorDetails ? `${error} ${errorDetails}` : error,
     openFolder, openFolderWithWriteAccess, getDeleteInfo, computeAndUpdateFolderSize, suspendSizeWork, resumeSizeWork, deleteChat, deleteChats, deleteMessengerChatsJsonOnly, updateFolderSize,
+    upsertMessengerChat,
   };
 }

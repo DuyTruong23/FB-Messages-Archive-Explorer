@@ -12,6 +12,9 @@ function Harness({ information = false }: { information?: boolean }) {
     {information && <PerformanceInformation value={settings.performance} />}
   </>;
 }
+// The full-panel render tests take ~1 s alone but can pass 5 s when the whole suite runs in parallel.
+vi.setConfig({ testTimeout: 15_000 });
+
 afterEach(() => { cleanup(); vi.useRealTimers(); localStorage.clear(); configurePerformance(defaultPerformancePreferences()); });
 
 it('preserves existing defaults, switches saved mode values live, and restores them after reload', () => {

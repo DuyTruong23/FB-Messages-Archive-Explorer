@@ -1,6 +1,9 @@
 import { useRef, useImperativeHandle, forwardRef, useState, useCallback, useMemo, useEffect, useLayoutEffect } from 'react';
 import type { MessengerThread, MediaState, ChatListEntry, SelectableItem } from '../../types/messenger';
-import { CalendarDays, Info } from 'lucide-react';
+import { CalendarDays, Info, ListChecks, Star, Trash2 } from 'lucide-react';
+import { useOverlayContext } from '../../hooks/useOverlay';
+import { useMessageSelectionContext } from '../../hooks/useMessageSelection';
+import { OverlayPanel, type OverlayPanelMode } from '../Overlay/OverlayPanel';
 import { LoadingLabel } from '../LoadingLabel';
 import { ParentBackButton } from '../Navigation/ParentBackButton';
 import { useReactionContext } from '../../hooks/useReactionFeature';
@@ -50,6 +53,11 @@ interface ChatViewProps {
   onNavigateToAttachment?: (item: SelectableItem) => void;
   attachmentJumpTarget?: AttachmentJumpTarget | null;
   onAttachmentJumpHandled?: () => void;
+  /** Ask for write access so overlay edits can be saved beside the conversation. */
+  onRequestOverlayWriteAccess?: () => Promise<boolean>;
+  /** A favorites file was written beside the source; add it to the chat list. */
+  onFavoritesFileSaved?: (fileName: string) => Promise<ChatListEntry | null>;
+  onOpenChat?: (entry: ChatListEntry) => void;
 }
 
 export interface ChatViewHandle {
@@ -112,10 +120,25 @@ export const ChatView = forwardRef<ChatViewHandle, ChatViewProps>(function ChatV
     onNavigateToAttachment,
     attachmentJumpTarget,
     onAttachmentJumpHandled,
+    onRequestOverlayWriteAccess,
+    onFavoritesFileSaved,
+    onOpenChat,
   },
   ref
 ) {
   const chatData = useThreadData(providedThread);
+  const overlay = useOverlayContext();
+  const messageSelection = useMessageSelectionContext();
+  const [overlayPanel, setOverlayPanel] = useState<OverlayPanelMode | null>(null);
+  useEffect(() => setOverlayPanel(null), [chatData]);
+  const overlayReady = overlay.available && !!chatData && overlay.messageIds.length === chatData.messages.length;
+  useEffect(() => {
+    if (!messageSelection.active) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') messageSelection.stop(); };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [messageSelection]);
+  const closeOverlayPanel = useCallback(() => setOverlayPanel(null), []);
   const reactions = useReactionContext();
   const totalHiddenCount = useMemo(() => reactions.hide ? (chatData?.messages || []).filter(isReactionNoticeMessage).length : 0, [chatData, reactions.hide]);
   const [reportedHidden, setReportedHidden] = useState<{ data: MessengerThread | null; hide: boolean; count: number } | null>(null);
@@ -323,7 +346,7 @@ export const ChatView = forwardRef<ChatViewHandle, ChatViewProps>(function ChatV
               data-date-expanded={dateHeaderExpanded ?? undefined}
               onPointerDown={() => setDateKeyboardFocus(false)}
               onPointerOver={event => {
-                setDateHeaderHovered(!(event.target instanceof Element && event.target.closest('.chat-info-toggle')));
+                setDateHeaderHovered(!(event.target instanceof Element && event.target.closest('.chat-info-toggle, .chat-overlay-actions')));
               }}
               onPointerLeave={() => {
                 setDateHeaderHovered(false);
@@ -363,6 +386,43 @@ export const ChatView = forwardRef<ChatViewHandle, ChatViewProps>(function ChatV
                 />
               )}
 
+              {overlayReady && !loading && (
+                <div className="chat-overlay-actions">
+                  <button
+                    type="button"
+                    className="chat-overlay-btn"
+                    aria-label="Favorites"
+                    title="Favorites"
+                    aria-expanded={overlayPanel === 'favorites'}
+                    onClick={() => setOverlayPanel(panel => panel === 'favorites' ? null : 'favorites')}
+                  >
+                    <Star size={18} aria-hidden="true" />
+                    {overlay.favoritesByIndex.size > 0 && <span className="chat-overlay-count">{overlay.favoritesByIndex.size}</span>}
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-overlay-btn"
+                    aria-label="Tin nhắn đã xóa"
+                    title="Đã xóa"
+                    aria-expanded={overlayPanel === 'deleted'}
+                    onClick={() => setOverlayPanel(panel => panel === 'deleted' ? null : 'deleted')}
+                  >
+                    <Trash2 size={18} aria-hidden="true" />
+                    {overlay.deletedCount > 0 && <span className="chat-overlay-count">{overlay.deletedCount}</span>}
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-overlay-btn"
+                    aria-label="Chọn nhiều tin nhắn"
+                    title="Chọn nhiều (Shift+click chọn một đoạn)"
+                    aria-pressed={messageSelection.active}
+                    onClick={() => messageSelection.active ? messageSelection.stop() : messageSelection.start()}
+                  >
+                    <ListChecks size={18} aria-hidden="true" />
+                  </button>
+                </div>
+              )}
+
               <button
                 className="chat-info-toggle"
                 id="chatInfoToggle"
@@ -377,6 +437,63 @@ export const ChatView = forwardRef<ChatViewHandle, ChatViewProps>(function ChatV
           </div>
 
           <div id="line" />
+
+          {overlayReady && messageSelection.active && !loading && (
+            <div className="message-selection-bar" role="toolbar" aria-label="Chọn tin nhắn">
+              <span>
+                <strong>{messageSelection.selected.size}</strong> đã chọn{' '}
+                <small>· Shift+click để chọn một đoạn · Esc để thoát</small>
+              </span>
+              <div className="actions">
+                <button type="button" className="overlay-small-btn" onClick={messageSelection.stop}>Hủy</button>
+                {(() => {
+                  const allFavorite = messageSelection.selected.size > 0
+                    && [...messageSelection.selected].every(index => overlay.favoriteIndices.has(index));
+                  return (
+                    <button
+                      type="button"
+                      className="overlay-small-btn"
+                      aria-pressed={allFavorite}
+                      disabled={messageSelection.selected.size === 0}
+                      onClick={() => {
+                        overlay.setFavorites([...messageSelection.selected], !allFavorite);
+                        messageSelection.stop();
+                      }}
+                    >
+                      <Star size={14} aria-hidden="true" />{allFavorite ? 'Bỏ favorite' : 'Favorite'}
+                    </button>
+                  );
+                })()}
+                <button
+                  type="button"
+                  className="overlay-small-btn danger"
+                  disabled={messageSelection.selected.size === 0}
+                  onClick={() => {
+                    overlay.deleteMessages([...messageSelection.selected]);
+                    messageSelection.stop();
+                  }}
+                >
+                  <Trash2 size={14} aria-hidden="true" />Xóa
+                </button>
+              </div>
+            </div>
+          )}
+
+          {overlayReady && overlayPanel && chatData && !loading && (
+            <OverlayPanel
+              mode={overlayPanel}
+              chatData={chatData}
+              overlay={overlay}
+              onClose={closeOverlayPanel}
+              onRequestWriteAccess={onRequestOverlayWriteAccess}
+              onFavoritesFileSaved={onFavoritesFileSaved}
+              onOpenChat={onOpenChat}
+              onJumpToMessage={index => {
+                if (mobile) setOverlayPanel(null);
+                void handleJumpToMessage(index);
+              }}
+            />
+          )}
 
           {!loading && chatData && hasHiddenNotices && noticeHintChat === chatData && <div className="reaction-notice-overlay">
             <div className="reaction-notice-panel" role="region" aria-label="Hidden reaction notices">

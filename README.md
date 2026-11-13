@@ -121,6 +121,37 @@ ZIP downloads support at most 65,535 files and 4 GiB. In Chromium browsers, use 
 - Show or hide sender names and reactions
 - Resize the sidebar and statistics panel by dragging
 
+**Message Edits (standalone Messenger exports)**
+
+- Hide messages (soft delete) one at a time or with checkboxes; Shift+click selects a range. **Undo** appears after each deletion, and the **Đã xóa** panel restores messages.
+- Favorite messages with ☆ on hover, add an optional note, and open the **Favorites** panel to jump to them.
+- In selection mode, **Favorite** / **Bỏ favorite** applies to every selected message.
+- **Lưu file favorites** (Favorites panel) writes `<thread>.favorites.json` beside the source: a conversation in the same format holding only the favorite messages, with the original media paths and reactions. It appears in the chat list as "<name> (Favorites)" right away and opens like the original chat. Notes are kept in its `favoriteNotes` field. Hidden (soft-deleted) favorites are left out. Saving again replaces the file with the current favorites.
+- **Export bản sạch** writes `<thread>.cleaned.json` without the hidden messages. The original file is unchanged.
+- The participant chosen as "me" (View perspective) is remembered per conversation.
+
+Edits are stored in `<thread>.overlay.json` beside the conversation file. The app never writes the conversation JSON or the `media/` folder; it can only create files ending in `.overlay.json`, `.cleaned.json` or `.favorites.json`. Overlay and cleaned files are skipped when listing chats; favorites files are listed as chats. Without write access (read-only folder, Firefox, Safari), edits are kept in the browser's IndexedDB, and **Export overlay** downloads them. **Cho phép ghi file** in either panel requests write access and moves the edits into the overlay file. Message identity is a hash of timestamp, sender, and position in the file, so an overlay applies only to the same export file.
+
+Overlay file format:
+
+```json
+{
+  "version": 1,
+  "sourceFile": "Thanh Dii_0.json",
+  "deleted": ["<messageId>"],
+  "favorites": [{ "id": "<messageId>", "addedAt": 1794366226000, "note": "" }],
+  "settings": { "me": "Quoc Duy" },
+  "updatedAt": 1794366226000
+}
+```
+
+**Advanced Search**
+
+- In "Chat" mode, results update 200 ms after typing. The count and ▲/▼ buttons step through results.
+- The filter button (⚙) adds sender, date range (Hôm nay, 7 ngày, 30 ngày, a month or year, or exact from/to), media, link, and favorite filters. Filters alone, with an empty query, also list messages.
+- Accent-insensitive matching is on by default ("loi" finds "lỗi", "LỖI", "lôi"); turn it off to match accents exactly. "All" mode applies only this option.
+- Hidden (soft-deleted) messages never appear in results. Failed downloads are searchable as "Media tải lỗi".
+
 **Archive Management (optional)**
 
 - Select one or more conversations and delete them permanently from your exported archive
@@ -367,8 +398,9 @@ The production browser command builds before starting preview. To run selected c
 - File access uses the browser's [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API). The browser asks you to select a folder; access is limited to that folder only. On browsers without this API, a folder-upload input is used instead.
 - You can revoke access at any time by closing the tab or refreshing the page.
 - Settings (dark mode, panel widths, etc.) are saved in `localStorage` on your computer, with a cookie fallback if `localStorage` is unavailable. No settings data is sent anywhere.
+- Searching **All** chats builds a search index of message text and saves it in the browser's IndexedDB (`fb-mae-search-index`), so the next search after a reload skips re-reading every chat. An index is rebuilt when a chat's files change, and at most 500 chats are kept. The index never leaves your computer. To remove it, clear this site's data in your browser settings.
 - There are no analytics, telemetry, or third-party scripts.
-- Write access to your archive is only requested if you enable chat deletion in Settings.
+- Write access to your archive is only requested if you enable chat deletion or bookmarking in Settings, or press **Cho phép ghi file** to save message edits.
 - The source code is fully open and can be audited.
 
 ---

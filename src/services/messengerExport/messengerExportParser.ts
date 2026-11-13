@@ -70,7 +70,7 @@ function normalizeMediaItems(items: MediaItem[] | undefined): { media: MediaItem
   return { media, failedMediaCount };
 }
 
-function normalizeMessage(raw: RawMessengerExportMessage): MessengerMessage {
+function normalizeMessage(raw: RawMessengerExportMessage, sourceIndex: number): MessengerMessage {
   const sender = fixEncoding(String(raw.senderName || raw.sender_name || ''));
   const text = fixEncoding(String(raw.text ?? raw.content ?? ''));
   const timestamp = Number(raw.timestamp_ms ?? raw.timestamp ?? 0);
@@ -107,6 +107,7 @@ function normalizeMessage(raw: RawMessengerExportMessage): MessengerMessage {
         }))
       : [],
     is_unsent: Boolean(raw.is_unsent ?? raw.isUnsent),
+    _sourceIndex: sourceIndex,
   };
 
   for (const item of media) {
@@ -127,7 +128,7 @@ function parseMessengerExportRaw(raw: RawMessengerExportThread): MessengerThread
 
   const thread: MessengerThread = {
     participants,
-    messages: Array.isArray(raw.messages) ? raw.messages.map(normalizeMessage) : [],
+    messages: Array.isArray(raw.messages) ? raw.messages.map((message, index) => normalizeMessage(message, index)) : [],
     title,
     thread_path: sanitizeFileName(title),
     is_still_participant: true,

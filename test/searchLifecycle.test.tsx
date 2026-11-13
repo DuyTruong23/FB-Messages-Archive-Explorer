@@ -4,30 +4,41 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatListEntry, MessengerThread } from '../src/types/messenger';
 import { createMockDirectoryHandle } from './helpers/mockFileSystem';
 
-const serviceMocks = vi.hoisted(() => ({
-  loadChatMessages: vi.fn(),
-  loadMessengerExportChat: vi.fn(),
-}));
+// jsdom's Blob has no text(); browsers and the search worker do.
+if (typeof Blob.prototype.text !== 'function') {
+  Blob.prototype.text = function text(this: Blob) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(this);
+    });
+  };
+}
 
-vi.mock('../src/services/fileSystem', async importOriginal => ({
-  ...(await importOriginal<typeof import('../src/services/fileSystem')>()),
-  loadChatMessages: serviceMocks.loadChatMessages,
-}));
-vi.mock('../src/services/messengerExport', async importOriginal => ({
-  ...(await importOriginal<typeof import('../src/services/messengerExport')>()),
-  loadMessengerExportChat: serviceMocks.loadMessengerExportChat,
-}));
+const serviceMocks = vi.hoisted(() => ({ collectChatSearchFiles: vi.fn() }));
+
+vi.mock('../src/services/wideSearch/chatSearchFiles', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/services/wideSearch/chatSearchFiles')>();
+  serviceMocks.collectChatSearchFiles.mockImplementation(actual.collectChatSearchFiles);
+  return { ...actual, collectChatSearchFiles: serviceMocks.collectChatSearchFiles };
+});
 
 import { useSearch } from '../src/hooks/useSearch';
+import { getWideSearchClient } from '../src/services/wideSearch/wideSearchClient';
 
-function entry(name: string): ChatListEntry {
+function part(content: string): string {
+  return JSON.stringify({ participants: [{ name: 'Alice' }], messages: [{ sender_name: 'Alice', timestamp_ms: 1, content }] });
+}
+
+function entry(name: string, content?: string): ChatListEntry {
   return {
     folderName: name,
     title: `${name} title`,
     participants: [],
     messageCount: 1,
     folderSize: 0,
-    dirHandle: createMockDirectoryHandle(name, {}),
+    dirHandle: createMockDirectoryHandle(name, content === undefined ? {} : { 'message_1.json': part(content) }),
     jsonFileCount: 1,
     source: 'inbox',
   };
@@ -42,9 +53,9 @@ function thread(content: string, count = 1): MessengerThread {
   };
 }
 
-afterEach(() => {
-  serviceMocks.loadChatMessages.mockReset();
-  serviceMocks.loadMessengerExportChat.mockReset();
+afterEach(async () => {
+  serviceMocks.collectChatSearchFiles.mockClear();
+  await getWideSearchClient().clearAll();
 });
 
 describe('search hook lifecycle', () => {
@@ -62,10 +73,7 @@ describe('search hook lifecycle', () => {
 
   it('attributes wide results to their chats and continues past an unreadable chat', async () => {
     const unreadable = entry('unreadable');
-    const readable = entry('readable');
-    serviceMocks.loadChatMessages
-      .mockRejectedValueOnce(new Error('permission denied'))
-      .mockResolvedValueOnce(thread('needle'));
+    const readable = entry('readable', 'needle');
     const { result } = renderHook(() => useSearch(null, [unreadable, readable]));
     act(() => result.current.setIsWideSearch(true));
 
@@ -78,62 +86,56 @@ describe('search hook lifecycle', () => {
     expect(result.current.progress).toBe(100);
   });
 
+  it('keeps wide results in chat-list order', async () => {
+    const chats = ['a', 'b', 'c', 'd', 'e'].map(name => entry(name, `${name} needle`));
+    const { result } = renderHook(() => useSearch(null, chats));
+    act(() => result.current.setIsWideSearch(true));
+
+    await act(async () => { await result.current.startSearch('needle'); });
+
+    expect(result.current.results.map(found => found.item.chatFolderName)).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+
   it('does not publish a wide-search result that resolves after cancellation', async () => {
-    const chat = entry('slow');
-    let release!: (value: MessengerThread) => void;
-    serviceMocks.loadChatMessages.mockImplementation((_handle, _progress, signal: AbortSignal) => (
-      new Promise<MessengerThread>((resolve, reject) => {
-        release = resolve;
-        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
-      })
-    ));
+    const chat = entry('slow', 'needle');
+    let release!: (files: File[]) => void;
+    serviceMocks.collectChatSearchFiles.mockImplementationOnce(() => new Promise<File[]>(resolve => { release = resolve; }));
     const { result } = renderHook(() => useSearch(null, [chat]));
     act(() => result.current.setIsWideSearch(true));
     let searching!: Promise<void>;
     act(() => { searching = result.current.startSearch('needle'); });
-    await waitFor(() => expect(serviceMocks.loadChatMessages).toHaveBeenCalledOnce());
+    await waitFor(() => expect(serviceMocks.collectChatSearchFiles).toHaveBeenCalledOnce());
 
     act(() => result.current.clearSearch());
-    release(thread('needle'));
+    release([new File([part('needle')], 'message_1.json')]);
     await act(async () => { await searching; });
 
     expect(result.current).toMatchObject({ activeQuery: '', results: [], progress: 0, isSearching: false });
   });
 
   it('aborts an older search before publishing the replacement results', async () => {
-    const chat = entry('replace');
-    let rejectFirst!: (reason: DOMException) => void;
-    serviceMocks.loadChatMessages
-      .mockImplementationOnce((_handle, _progress, signal: AbortSignal) => (
-        new Promise<MessengerThread>((_resolve, reject) => {
-          rejectFirst = reject;
-          signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
-        })
-      ))
-      .mockResolvedValueOnce(thread('replacement needle'));
+    const chat = entry('replace', 'replacement needle');
+    let releaseFirst!: (files: File[]) => void;
+    serviceMocks.collectChatSearchFiles.mockImplementationOnce(() => new Promise<File[]>(resolve => { releaseFirst = resolve; }));
     const { result } = renderHook(() => useSearch(null, [chat]));
     act(() => result.current.setIsWideSearch(true));
     let first!: Promise<void>;
     act(() => { first = result.current.startSearch('old'); });
-    await waitFor(() => expect(serviceMocks.loadChatMessages).toHaveBeenCalledOnce());
+    await waitFor(() => expect(serviceMocks.collectChatSearchFiles).toHaveBeenCalledOnce());
 
     let second!: Promise<void>;
     act(() => { second = result.current.startSearch('replacement'); });
+    releaseFirst([new File([part('old needle')], 'message_1.json')]);
     await act(async () => { await Promise.all([first, second]); });
 
-    expect(rejectFirst).toBeTypeOf('function');
     expect(result.current.activeQuery).toBe('replacement');
     expect(result.current.results.map(found => found.item.text)).toEqual(['replacement needle']);
     expect(result.current.isSearching).toBe(false);
   });
 
-  it('scopes wide-search cache entries to directory handles and clears them explicitly', async () => {
-    const first = entry('same-folder');
-    const second = entry('same-folder');
-    serviceMocks.loadChatMessages
-      .mockResolvedValueOnce(thread('first needle'))
-      .mockResolvedValueOnce(thread('second needle'))
-      .mockResolvedValueOnce(thread('third needle'));
+  it('rebuilds a cached wide index when the chat files change', async () => {
+    const first = entry('same-folder', 'first needle');
+    const second = entry('same-folder', 'second needle!');
     const { result, rerender } = renderHook(
       ({ archive }) => useSearch(null, archive),
       { initialProps: { archive: [first] } },
@@ -144,11 +146,10 @@ describe('search hook lifecycle', () => {
 
     rerender({ archive: [second] });
     await act(async () => { await result.current.startSearch('needle'); });
-    expect(result.current.results[0].item.text).toBe('second needle');
+    expect(result.current.results[0].item.text).toBe('second needle!');
 
     act(() => result.current.clearWideSearchCache());
     await act(async () => { await result.current.startSearch('needle'); });
-    expect(result.current.results[0].item.text).toBe('third needle');
-    expect(serviceMocks.loadChatMessages).toHaveBeenCalledTimes(3);
+    expect(result.current.results[0].item.text).toBe('second needle!');
   });
 });

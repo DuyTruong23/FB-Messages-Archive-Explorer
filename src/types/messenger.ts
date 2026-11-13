@@ -56,6 +56,8 @@ export interface MessengerMessage {
   is_unsent_image_by_messenger_kid_parent?: boolean;
   /** Legacy/imported field; classification uses a separate WeakMap. */
   _isReactionNotice?: boolean;
+  /** Position in the source file's message array, recorded before sorting. */
+  _sourceIndex?: number;
 }
 
 export interface MessengerThread {
@@ -150,6 +152,10 @@ export interface DateNavState {
 export interface SearchIndexEntry {
   text: string;
   normalized: string;
+  /** Lower-cased text with diacritics kept, for exact-accent matching. */
+  exact?: string;
+  hasMedia?: boolean;
+  hasLink?: boolean;
   sender: string;
   timestamp: number;
   idx: number;

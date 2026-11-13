@@ -9,6 +9,8 @@ export {
   listMessengerExportChats,
   listMessengerExportChatsIndexed,
   loadMessengerExportChat,
+  loadMessengerExportEntry,
+  compareChatsByRecency,
   type MessengerExportListingResult,
   type MessengerExportListingOptions,
 } from './messengerExportLoader';
