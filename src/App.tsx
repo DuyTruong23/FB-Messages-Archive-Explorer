@@ -4,7 +4,7 @@ import { useSettings } from './hooks/useSettings';
 import { useMobileLayout, useMobileNavigation } from './hooks/useMobileNavigation';
 import { getNavigationItemKey, type PreviewRequest } from './services/mobileNavigation';
 import { ReactionFeatureContext, useReactionFeature } from './hooks/useReactionFeature';
-import { useArchive } from './hooks/useArchive';
+import { useArchive, type OpenFolderSource } from './hooks/useArchive';
 import { useDeleteDialog } from './hooks/useDeleteDialog';
 import { useNavigationSync } from './hooks/useNavigationSync';
 import { useChat } from './hooks/useChat';
@@ -29,6 +29,10 @@ import { ParentBackButton } from './components/Navigation/ParentBackButton';
 import { ENABLE_CONTEXTUAL_BACK_NAVIGATION } from './config/uiFeatures';
 import { TrustModal } from './components/Modals/TrustModal';
 import { ReloadPrompt } from './components/ReloadPrompt';
+import { isAndroidApp } from './config/platform';
+import { exposeAndroidBack } from './platform/android/backNavigation';
+import { getFolderKey, getSavedFolder } from './platform/android/savedFolder';
+import { useLastLocation } from './hooks/useLastLocation';
 import { DeleteConfirmModal } from './components/Modals/DeleteConfirmModal';
 import type { ChatListEntry, SelectableItem } from './types/messenger';
 import { isFileSystemAccessSupported } from './services/fileSystem';
@@ -40,6 +44,7 @@ export default function App() {
   const isMobile = useMobileLayout();
   const { controller: navigation, state: navigationState } = useMobileNavigation(isMobile);
   const location = navigationState.location;
+  useEffect(() => (isAndroidApp() ? exposeAndroidBack(window, navigation) : undefined), [navigation]);
   const archive = useArchive(settings.deletionEnabled, settings.debuggingEnabled);
   const chat = useChat();
   const overlay = useOverlay(chat.activeEntry, chat.chatData);
@@ -192,7 +197,15 @@ export default function App() {
     chat.activeEntry ? upsertMessengerChat(chat.activeEntry.dirHandle, fileName) : Promise.resolve(null)
   ), [chat.activeEntry, upsertMessengerChat]);
 
-  const handleOpenFolder = useCallback(async () => {
+  const savedFolder = useMemo(() => getSavedFolder(), []);
+  const lastLocation = useLastLocation({
+    navigation, savedFolder, folderKey: getFolderKey(archive.originalRootHandle),
+    archiveList, archiveLoading: archive.loading,
+    activeEntry: chat.activeEntry, chatLoading: chat.loading, chatData: chat.chatData,
+  });
+  const { beginRestore: beginLocationRestore, skipRestore: skipLocationRestore } = lastLocation;
+
+  const openArchiveFolder = useCallback(async (pick?: OpenFolderSource['pick'], onOpened?: OpenFolderSource['onOpened']) => {
     const picked = await archive.openFolder(
       settings.deletionEnabled || settings.attachmentBookmarkingEnabled,
       () => {
@@ -206,11 +219,36 @@ export default function App() {
         navigation.reset();
       },
       settings.folderAccessMode,
+      { pick, onOpened: handle => {
+        if (savedFolder) void savedFolder.remember(handle);
+        onOpened?.(handle);
+      } },
     );
     if (picked) {
       resetAfterHandledOpen();
     }
-  }, [settings.deletionEnabled, settings.attachmentBookmarkingEnabled, settings.folderAccessMode, archive, chat, search, selection, navigation, abortForPickedFolder, resetAfterHandledOpen, resetSidebar, hideGallery]);
+  }, [savedFolder, settings.deletionEnabled, settings.attachmentBookmarkingEnabled, settings.folderAccessMode, archive, chat, search, selection, navigation, abortForPickedFolder, resetAfterHandledOpen, resetSidebar, hideGallery]);
+
+  const handleOpenFolder = useCallback(() => openArchiveFolder(), [openArchiveFolder]);
+
+  // Android: reopen the folder, chat and scroll position from the last session.
+  const restoreAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (restoreAttemptedRef.current) return;
+    restoreAttemptedRef.current = true;
+    if (!savedFolder) return;
+    let reopened = false;
+    void openArchiveFolder(async () => {
+      const handle = await savedFolder.restore();
+      if (!handle) throw new DOMException('No saved folder', 'AbortError');
+      return handle;
+    }, handle => {
+      reopened = true;
+      beginLocationRestore(getFolderKey(handle));
+    }).finally(() => {
+      if (!reopened) skipLocationRestore();
+    });
+  }, [savedFolder, openArchiveFolder, beginLocationRestore, skipLocationRestore]);
 
   const requestOverlayWriteAccess = useCallback(async (): Promise<boolean> => {
     const handle = archive.originalRootHandle || archive.rootHandle;
@@ -492,7 +530,7 @@ export default function App() {
           </button>
           <button type="button" className="jump-return-dismiss" aria-label="Dismiss return action" onClick={() => navigation.dismissJumpReturn()}><X size={16} /></button>
         </div>}
-        {settings.offlineSupportEnabled && (
+        {!isAndroidApp() && settings.offlineSupportEnabled && (
           <ReloadPrompt canAutoReload={!archive.rootHandle && !archive.loading} />
         )}
         {overlay.undo && (

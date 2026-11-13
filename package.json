@@ -6,6 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:web:android": "tsc -b && vite build --mode android",
+    "build:android": "node scripts/build-android.mjs assembleDebug",
+    "build:android:release": "node scripts/build-android.mjs assembleRelease",
+    "test:android": "node scripts/build-android.mjs testDebugUnitTest",
     "lint": "oxlint",
     "test": "vitest run test",
     "test:e2e": "npm run build && node scripts/run-e2e.mjs",

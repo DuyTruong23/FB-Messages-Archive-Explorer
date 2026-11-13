@@ -356,6 +356,30 @@ npm run build
 npm run preview
 ```
 
+**Build the Android app (APK)**
+
+The Android app runs the same web app in a WebView and opens folders through the Android Storage Access Framework, so every feature, including write features such as deletion, bookmarks and message edits, works on Android. The APK has no internet permission.
+
+Requirements: JDK 17 or later and the Android SDK with platform 37. Create `android/local.properties` with `sdk.dir=…`. Optionally add `fbmae.outputRoot=<folder>` to put build output outside the source tree.
+
+```bash
+npm run build:android
+```
+
+```bash
+npm run build:android:release
+```
+
+Without `android/keystore.properties`, the release APK is signed with the debug key; it can be sideloaded but not published.
+
+On Android 11 and later, the folder picker cannot select the root of internal storage or the root of `Download`. Extract the export into its own folder, for example `Download/facebook-export`, and select that folder.
+
+The app remembers the last folder it opened and reopens it when you start the app again, on the same screen: the open chat (or its info or attachments) and its scroll position. A media preview or selection is not restored. Selecting another folder replaces it. If you remove the app's access to the folder in system settings, the app shows the folder picker again.
+
+The system Back button first closes an open viewer, dialog, menu or panel, then goes up one screen (attachment list → chat info → chat → chat list), and closes the app from the chat list. Rotating the device keeps the open chat and its scroll position.
+
+Measured on a Galaxy S23 (2026-11-11/12, fake test archive): release APK size 0.34 MB, cold start 216–262 ms (`am start -W`, 3 runs), memory while playing and seeking a 300 MB video about 420 MB total PSS (app process about 260 MB plus WebView renderer about 160 MB).
+
 <a name="64-other-developer-commands"></a>
 
 ### 6.4. Other Developer Commands

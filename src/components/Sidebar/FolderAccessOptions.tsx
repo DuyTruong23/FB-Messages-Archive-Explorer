@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { isAndroidApp } from '../../config/platform';
 import { isFileSystemAccessSupported } from '../../services/fileSystem';
 import type { FolderAccessMode } from '../../types/fileSystem';
 import { OptionDropdown } from './OptionDropdown';
@@ -9,6 +10,7 @@ export function FolderAccessOptions({ mode, onChange, showDescription = true }: 
   showDescription?: boolean;
 }) {
   const id = useId();
+  if (isAndroidApp()) return null;
   const nativeSupported = isFileSystemAccessSupported();
   const selectedMode = nativeSupported && mode !== 'upload' ? 'native' : 'upload';
 

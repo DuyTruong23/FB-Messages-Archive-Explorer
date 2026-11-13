@@ -8,6 +8,7 @@ import type { MetaArchivePlatform } from './metaAttachmentPaths';
 import { runFolderOperation, type FolderOpenDiagnostics } from './folderOpenDiagnostics';
 import { createConcurrencyLimiter, mapWithConcurrency, type ConcurrencyLimiter } from './concurrency';
 import { performanceLimit } from './performanceSettings';
+import { isAndroidApp } from '../config/platform';
 
 const SELECTED_MESSAGES_DIRECTORY = [] as const;
 const FACEBOOK_EXPORT_MESSAGES_DIRECTORY = ['messages'] as const;
@@ -80,15 +81,21 @@ export function isWriteAccessSupported(): boolean {
 
 import { openFolderPolyfill } from './polyfill';
 
+function shouldUseUploadFallback(accessMode: FolderAccessMode): boolean {
+  // The Android app always opens folders through the SAF picker shim.
+  if (isAndroidApp()) return false;
+  return accessMode === 'upload' || !isFileSystemAccessSupported();
+}
+
 export async function pickMessagesFolder(accessMode: FolderAccessMode = 'native', onPreparationProgress?: (done: number, total: number) => void): Promise<ReadableDirectoryHandle> {
-  if (accessMode === 'upload' || !isFileSystemAccessSupported()) {
+  if (shouldUseUploadFallback(accessMode)) {
     return openFolderPolyfill(onPreparationProgress);
   }
   return window.showDirectoryPicker({ id: 'messages-folder', mode: 'read' });
 }
 
 export async function pickFolderWithWriteAccess(accessMode: FolderAccessMode = 'native', onPreparationProgress?: (done: number, total: number) => void): Promise<ReadableDirectoryHandle> {
-  if (accessMode === 'upload' || !isFileSystemAccessSupported()) {
+  if (shouldUseUploadFallback(accessMode)) {
     // Upload fallback handles are read-only but still support archive browsing.
     return openFolderPolyfill(onPreparationProgress);
   }

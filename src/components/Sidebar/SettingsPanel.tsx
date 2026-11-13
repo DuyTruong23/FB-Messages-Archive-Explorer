@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { DEFAULT_ATTACHMENT_FILENAME_TEMPLATE } from '../../services/saveAttachments';
 import { disableOfflineSupport } from '../../services/pwa';
+import { isAndroidApp } from '../../config/platform';
 import { useThreadData } from '../../hooks/useThreadData';
 import { FolderAccessOptions } from './FolderAccessOptions';
 import { SettingsInfoModal, SettingsInfoRow } from '../Modals/SettingsInfoModal';
@@ -471,18 +472,20 @@ export function SettingsPanel({
                 )}
             </SettingsSection>
 
-            <SettingsSection title="Offline use" onInfo={() => setInfoSection('offline')}>
-                <ToggleRow
-                    id="offlineSupportEnabledToggle"
-                    label="Keep app available offline"
-                    checked={settings.offlineSupportEnabled}
-                    onChange={handleOfflineSupportToggle}
-                    disabled={offlineSupportBusy}
-                />
-                {offlineSupportError && (
-                    <p className="browser-notice">{offlineSupportError}</p>
-                )}
-            </SettingsSection>
+            {!isAndroidApp() && (
+                <SettingsSection title="Offline use" onInfo={() => setInfoSection('offline')}>
+                    <ToggleRow
+                        id="offlineSupportEnabledToggle"
+                        label="Keep app available offline"
+                        checked={settings.offlineSupportEnabled}
+                        onChange={handleOfflineSupportToggle}
+                        disabled={offlineSupportBusy}
+                    />
+                    {offlineSupportError && (
+                        <p className="browser-notice">{offlineSupportError}</p>
+                    )}
+                </SettingsSection>
+            )}
 
             <SettingsSection title="Performance" onInfo={() => setInfoSection('performance')}>
                 <PerformanceControls value={settings.performance} onChange={value => setSetting('performance', value)} />
